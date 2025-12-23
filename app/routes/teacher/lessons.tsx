@@ -768,13 +768,6 @@ export default function Lessons() {
                             <div className="text-sm text-slate-500">
                               {l.code}
                             </div>
-
-                            {/* Hiển thị thêm mô tả (NoiDungBaiHoc) nếu muốn */}
-                            {l.raw.NoiDungBaiHoc ? (
-                              <div className="mt-1 line-clamp-1 text-sm text-slate-400">
-                                {l.raw.NoiDungBaiHoc}
-                              </div>
-                            ) : null}
                           </div>
                         </div>
                       </td>
