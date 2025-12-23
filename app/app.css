@@ -1,0 +1,62 @@
+@import "tailwindcss";
+@layer {
+  /* @import url("https://fonts.googleapis.com/css2?family=Lexend+Exa:wght@100..900&family=Roboto:ital,wght@0,100..900;1,100..900&display=swap"); */
+  *,
+  html,
+  body {
+    box-sizing: border-box;
+  }
+
+  body {
+    font-family: "Roboto", sans-serif;
+    /* font-family: "Lexend Exa", sans-serif; */
+    font-optical-sizing: auto;
+    font-size: 16px;
+    font-weight: 400;
+    line-height: 1.5;
+    font-style: normal;
+  }
+
+  .section-wrapper {
+    max-width: 1200px;
+    margin-inline: auto;
+  }
+
+  .banner-item {
+    @apply w-full h-87.5 object-cover object-center;
+  }
+
+  /* Chrome, Edge, Safari */
+  .scrollbar-thin-custom::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .scrollbar-thin-custom::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-thin-custom::-webkit-scrollbar-thumb {
+    background-color: rgba(100, 116, 139, 0.4);
+    border-radius: 9999px;
+  }
+
+  .scrollbar-thin-custom::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(100, 116, 139, 0.6);
+  }
+
+  /* Firefox */
+  .scrollbar-thin-custom {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(100, 116, 139, 0.4) transparent;
+  }
+
+  .simple-editor-content .tiptap.ProseMirror.simple-editor {
+    padding: 2rem 0 8rem !important;
+  }
+
+  .tiptap.ProseMirror img{
+    max-width: 400px;
+    width: auto;
+    height: auto;
+  }
+}
