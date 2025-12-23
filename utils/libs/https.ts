@@ -28,7 +28,7 @@ export const authStorage = {
 };
 
 export const http = axios.create({
-  baseURL: "http://localhost:8080",
+  baseURL: "http://localhost:8000",
   headers: {
     Accept: "application/json",
     "Content-Type": "application/json",
