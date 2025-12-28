@@ -4,6 +4,8 @@ import { FormProvider, useForm } from "react-hook-form";
 import { Link } from "react-router";
 import { http } from "utils/libs/https";
 import { ContentLayoutWrapper } from "~/layouts/admin-layout/items/content-layout-wrapper";
+import { DropdownSelectPortal } from "elements/dropdown/dropdown";
+import { useAuth } from "hooks/useAuth";
 
 /** =======================
  *  Types
@@ -72,6 +74,13 @@ type FormValues = {
   TenChuDe: string;
 };
 
+type EditLessonFormValues = {
+  IDBaiHoc: string;
+  IDChuDe: string;
+  TenBaiHoc: string;
+  NoiDungBaiHoc: string;
+};
+
 const defaultConfig: Config = {
   background_color: "#F8FAFC",
   primary_color: "#F59E0B",
@@ -94,47 +103,6 @@ function slugifyToId(name: string): string {
     .replace(/\s+/g, "_")
     .replace(/[^a-z0-9_]/g, "");
   return id;
-}
-
-function badgeBySubject(subject: string): string {
-  switch (subject) {
-    case "Listening":
-      return "bg-blue-100 text-blue-700";
-    case "Reading":
-      return "bg-violet-100 text-violet-700";
-    case "Grammar":
-      return "bg-emerald-100 text-emerald-700";
-    case "Speaking":
-      return "bg-orange-100 text-orange-700";
-    case "Vocabulary":
-      return "bg-cyan-100 text-cyan-700";
-    default:
-      return "bg-slate-100 text-slate-700";
-  }
-}
-
-function badgeByLevel(level: string): string {
-  switch (level) {
-    case "Beginner":
-      return "bg-emerald-100 text-emerald-700";
-    case "Intermediate":
-      return "bg-amber-100 text-amber-700";
-    case "Advanced":
-      return "bg-red-100 text-red-700";
-    default:
-      return "bg-slate-100 text-slate-700";
-  }
-}
-
-function badgeByStatus(status: string): string {
-  switch (status) {
-    case "Xuất bản":
-      return "bg-emerald-100 text-emerald-700";
-    case "Nháp":
-      return "bg-slate-100 text-slate-700";
-    default:
-      return "bg-slate-100 text-slate-700";
-  }
 }
 
 function pickGradient(seed: string) {
@@ -170,12 +138,75 @@ function mapLessonApiToUI(l: LessonApi): LessonUI {
   };
 }
 
+function getApiErrorMessage(err: any) {
+  const data = err?.response?.data;
+  if (!data) return err?.message || "Có lỗi xảy ra.";
+  if (typeof data?.detail === "string") return data.detail;
+  if (typeof data?.message === "string") return data.message;
+  const firstKey = Object.keys(data)[0];
+  const val = data[firstKey];
+  if (Array.isArray(val)) return val[0];
+  if (typeof val === "string") return val;
+  return "Có lỗi xảy ra.";
+}
+
+/** =======================
+ *  Modal (simple)
+ *  ======================= */
+function Modal({
+  open,
+  title,
+  onClose,
+  children,
+}: {
+  open: boolean;
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[999] flex items-center justify-center p-4">
+      <button
+        type="button"
+        className="absolute inset-0 bg-black/40"
+        onClick={onClose}
+        aria-label="Close modal overlay"
+      />
+      <div className="relative z-[1000] w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
+        <div className="flex items-start justify-between gap-4">
+          <div className="text-lg font-bold text-slate-800">{title}</div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            Đóng
+          </button>
+        </div>
+        <div className="mt-5">{children}</div>
+      </div>
+    </div>
+  );
+}
+
 /** =======================
  *  Page
  *  ======================= */
 export default function Lessons() {
+  const {user} = useAuth()
   const forms = useForm<FormValues>({
     defaultValues: { TenChuDe: "" },
+  });
+
+  const editForm = useForm<EditLessonFormValues>({
+    defaultValues: {
+      IDBaiHoc: "",
+      IDChuDe: "",
+      TenBaiHoc: "",
+      NoiDungBaiHoc: "",
+    },
   });
 
   const [config, setConfig] = useState<Config>(defaultConfig);
@@ -188,15 +219,16 @@ export default function Lessons() {
   // filters
   const [categoryKeyword, setCategoryKeyword] = useState<string>("");
   const [search, setSearch] = useState<string>("");
-  const [subjectFilter, setSubjectFilter] = useState<string>("Tất cả môn học");
-  const [levelFilter, setLevelFilter] = useState<string>("Tất cả cấp độ");
-  const [statusFilter, setStatusFilter] = useState<
-    "all" | "published" | "draft"
-  >("all");
 
   const [loadingCategories, setLoadingCategories] = useState(false);
   const [mutating, setMutating] = useState(false);
+
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // modal edit lesson
+  const [editOpen, setEditOpen] = useState(false);
+  const [savingLesson, setSavingLesson] = useState(false);
+  const [deletingLessonId, setDeletingLessonId] = useState<string | null>(null);
 
   /** Apply config to page */
   useEffect(() => {
@@ -290,9 +322,7 @@ export default function Lessons() {
     setLoadingCategories(true);
     setErrorMsg(null);
     try {
-      const res = await http.get<Paginated<CategoryApi>>(
-        "/api/lessons/chu-de/"
-      );
+      const res = await http.get<Paginated<CategoryApi>>("/api/lessons/chu-de/");
       const results = res.data.results ?? [];
 
       setCategoriesApi(results);
@@ -307,12 +337,7 @@ export default function Lessons() {
 
       setActiveCategoryId((prev) => prev ?? mapped[0]?.id ?? null);
     } catch (e: any) {
-      setErrorMsg(
-        e?.response?.data?.detail ||
-          e?.response?.data?.message ||
-          e?.message ||
-          "Không tải được danh sách chủ đề."
-      );
+      setErrorMsg(getApiErrorMessage(e) || "Không tải được danh sách chủ đề.");
     } finally {
       setLoadingCategories(false);
     }
@@ -344,15 +369,7 @@ export default function Lessons() {
       await fetchCategories();
       setActiveCategoryId(IDChuDe);
     } catch (e: any) {
-      const apiErr = e?.response?.data;
-      const msg =
-        apiErr?.TenChuDe?.[0] ||
-        apiErr?.IDChuDe?.[0] ||
-        apiErr?.detail ||
-        apiErr?.message ||
-        e?.message ||
-        "Thêm chủ đề thất bại.";
-      setErrorMsg(msg);
+      setErrorMsg(getApiErrorMessage(e) || "Thêm chủ đề thất bại.");
     } finally {
       setMutating(false);
     }
@@ -375,15 +392,7 @@ export default function Lessons() {
       });
       await fetchCategories();
     } catch (e: any) {
-      const apiErr = e?.response?.data;
-      const msg =
-        apiErr?.TenChuDe?.[0] ||
-        apiErr?.IDChuDe?.[0] ||
-        apiErr?.detail ||
-        apiErr?.message ||
-        e?.message ||
-        "Sửa chủ đề thất bại.";
-      setErrorMsg(msg);
+      setErrorMsg(getApiErrorMessage(e) || "Sửa chủ đề thất bại.");
     } finally {
       setMutating(false);
     }
@@ -405,13 +414,7 @@ export default function Lessons() {
         return next;
       });
     } catch (e: any) {
-      const apiErr = e?.response?.data;
-      const msg =
-        apiErr?.detail ||
-        apiErr?.message ||
-        e?.message ||
-        "Xóa chủ đề thất bại.";
-      setErrorMsg(msg);
+      setErrorMsg(getApiErrorMessage(e) || "Xóa chủ đề thất bại.");
     } finally {
       setMutating(false);
     }
@@ -433,13 +436,28 @@ export default function Lessons() {
     return categoriesApi.find((c) => c.IDChuDe === activeCategoryId) || null;
   }, [categoriesApi, activeCategoryId]);
 
+  /** Dropdown options for categories (modal edit) */
+  const categoryOptions = useMemo(
+    () =>
+      categoriesApi.map((c) => ({
+        label: (
+          <div className="flex flex-col">
+            <span className="font-semibold text-slate-800">{c.TenChuDe}</span>
+            {/* <span className="text-xs text-slate-500">ID: {c.IDChuDe}</span> */}
+          </div>
+        ),
+        value: c.IDChuDe,
+      })),
+    [categoriesApi]
+  );
+
   /** Map lessons from API => UI */
   const lessonsInActiveCategory = useMemo<LessonUI[]>(() => {
     const list = activeCategoryApi?.bai_hoc ?? [];
     return list.map(mapLessonApiToUI);
   }, [activeCategoryApi]);
 
-  /** Filter lessons (search/filters UI giữ nguyên; subject/level/status backend chưa có nên sẽ “—”) */
+  /** Filter lessons */
   const filteredLessons = useMemo(() => {
     return lessonsInActiveCategory.filter((l) => {
       const q = search.trim().toLowerCase();
@@ -450,28 +468,74 @@ export default function Lessons() {
         l.code.toLowerCase().includes(q) ||
         (l.raw.NoiDungBaiHoc || "").toLowerCase().includes(q);
 
-      const matchSubject =
-        subjectFilter === "Tất cả môn học" || l.subject === subjectFilter;
-
-      const matchLevel =
-        levelFilter === "Tất cả cấp độ" || l.level === levelFilter;
-
-      const matchStatus =
-        statusFilter === "all"
-          ? true
-          : statusFilter === "published"
-            ? l.status === "Xuất bản"
-            : l.status === "Nháp";
-
-      return matchSearch && matchSubject && matchLevel && matchStatus;
+      return matchSearch;
     });
-  }, [
-    lessonsInActiveCategory,
-    search,
-    subjectFilter,
-    levelFilter,
-    statusFilter,
-  ]);
+  }, [lessonsInActiveCategory, search]);
+
+  /** =======================
+   *  Lesson: DELETE
+   *  ======================= */
+  const handleDeleteLesson = async (lessonId: string) => {
+    if (!window.confirm("Bạn có chắc muốn xóa bài học này?")) return;
+
+    setDeletingLessonId(lessonId);
+    setErrorMsg(null);
+    try {
+      await http.delete(`/api/lessons/bai-hoc/${lessonId}/`);
+      await fetchCategories();
+    } catch (e: any) {
+      setErrorMsg(getApiErrorMessage(e) || "Xóa bài học thất bại.");
+    } finally {
+      setDeletingLessonId(null);
+    }
+  };
+
+  /** =======================
+   *  Lesson: OPEN EDIT MODAL
+   *  ======================= */
+  const openEditLesson = (lesson: LessonUI) => {
+    setErrorMsg(null);
+
+    editForm.reset({
+      IDBaiHoc: lesson.raw.IDBaiHoc,
+      IDChuDe: lesson.raw.IDChuDe,
+      TenBaiHoc: lesson.raw.TenBaiHoc || "",
+      NoiDungBaiHoc: lesson.raw.NoiDungBaiHoc || "",
+    });
+
+    setEditOpen(true);
+  };
+
+  const closeEditLesson = () => {
+    if (savingLesson) return;
+    setEditOpen(false);
+  };
+
+  /** =======================
+   *  Lesson: PATCH
+   *  ======================= */
+  const submitEditLesson = editForm.handleSubmit(async (data) => {
+    const id = (data.IDBaiHoc || "").trim();
+    if (!id) return;
+
+    setSavingLesson(true);
+    setErrorMsg(null);
+    try {
+      await http.patch(`/api/lessons/bai-hoc/${id}/`, {
+        IDBaiHoc: data.IDBaiHoc,
+        IDChuDe: data.IDChuDe,
+        TenBaiHoc: data.TenBaiHoc,
+        NoiDungBaiHoc: data.NoiDungBaiHoc,
+      });
+
+      setEditOpen(false);
+      await fetchCategories();
+    } catch (e: any) {
+      setErrorMsg(getApiErrorMessage(e) || "Sửa bài học thất bại.");
+    } finally {
+      setSavingLesson(false);
+    }
+  });
 
   return (
     <FormProvider {...forms}>
@@ -492,22 +556,8 @@ export default function Lessons() {
           </div>
 
           <div className="flex flex-wrap gap-3">
-            <button
-              type="button"
-              className="cursor-not-allowed inline-flex h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 font-semibold text-slate-600 shadow-sm transition hover:border-amber-400 hover:text-amber-600 active:scale-[0.99]"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-                <path
-                  d="M3 7C3 6.46957 3.21071 5.96086 3.58579 5.58579C3.96086 5.21071 4.46957 5 5 5H9L11 7H19C19.5304 7 20.0391 7.21071 20.4142 7.58579C20.7893 7.96086 21 8.46957 21 9V18C21 18.5304 20.7893 19.0391 20.4142 19.4142C20.0391 19.7893 19.5304 20 19 20H5C4.46957 20 3.96086 19.7893 3.58579 19.4142C3.21071 19.0391 3 18.5304 3 18V7Z"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                />
-              </svg>
-              Thư mục
-            </button>
-
             <Link
-              to="/teacher/lessons/create-new"
+              to="/teacher/lesson-create-new"
               className="inline-flex h-11 items-center gap-2 rounded-xl px-4 font-semibold text-white shadow-sm transition hover:opacity-95 active:scale-[0.99]"
               style={{ background: config.primary_color }}
             >
@@ -532,16 +582,6 @@ export default function Lessons() {
           <div className="flex flex-wrap items-center gap-3">
             {/* Search */}
             <div className="relative min-w-65 flex-1">
-              {/* <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                  <path
-                    d="M21 21L15 15M17 10C17 13.866 13.866 17 10 17C6.13401 17 3 13.866 3 10C3 6.13401 6.13401 3 10 3C13.866 3 17 6.13401 17 10Z"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </span> */}
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -550,20 +590,6 @@ export default function Lessons() {
                 className="w-full outline-none border border-[#e0e0e0] px-4 py-2 rounded-xl placeholder:text-slate-600 focus:border-amber-400 focus:ring-4 focus:ring-amber-100"
               />
             </div>
-
-            {/* subject / level (backend chưa có nên hiện lọc UI vẫn giữ) */}
-            {/* <select
-              value={subjectFilter}
-              onChange={(e) => setSubjectFilter(e.target.value)}
-              className="h-11 min-w-45 rounded-xl border border-slate-200 bg-white px-3 font-semibold text-slate-700 shadow-sm outline-none focus:border-amber-400 focus:ring-4 focus:ring-amber-100"
-            >
-              <option>Tất cả môn học</option>
-              <option>Listening</option>
-              <option>Reading</option>
-              <option>Grammar</option>
-              <option>Speaking</option>
-              <option>Vocabulary</option>
-            </select> */}
           </div>
         </div>
 
@@ -720,15 +746,8 @@ export default function Lessons() {
                       <input type="checkbox" className="cursor-pointer" />
                     </th>
                     <th>Bài học</th>
-                    <th>Môn học</th>
-                    <th>Cấp độ</th>
-                    <th>Thời lượng</th>
-                    <th>Bài tập</th>
-                    <th>Giáo viên</th>
-                    <th>Học viên</th>
-                    <th>Hoàn thành</th>
-                    <th>Trạng thái</th>
-                    <th>Ngày tạo</th>
+                    <th>Chủ đề</th>
+                    <th className="w-[220px]">Action</th>
                   </tr>
                 </thead>
 
@@ -765,78 +784,36 @@ export default function Lessons() {
                             <div className="font-semibold text-slate-800">
                               {l.title}
                             </div>
-                            <div className="text-sm text-slate-500">
-                              {l.code}
-                            </div>
+                            <div className="text-sm text-slate-500">{l.code}</div>
                           </div>
                         </div>
                       </td>
 
                       <td className="px-4 py-4">
-                        <span
-                          className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${badgeBySubject(
-                            l.subject
-                          )}`}
-                        >
-                          {l.subject}
+                        <span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold text-slate-700 border border-slate-200 bg-slate-50">
+                          {l?.raw?.IDChuDe_detail}
                         </span>
                       </td>
 
                       <td className="px-4 py-4">
-                        <span
-                          className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${badgeByLevel(
-                            l.level
-                          )}`}
-                        >
-                          {l.level}
-                        </span>
-                      </td>
-
-                      <td className="px-4 py-4 text-slate-500">{l.duration}</td>
-
-                      <td className="px-4 py-4 font-semibold text-slate-800">
-                        {l.exercises}
-                      </td>
-
-                      <td className="px-4 py-4 text-slate-500">{l.teacher}</td>
-
-                      <td className="px-4 py-4 font-semibold text-slate-800">
-                        {l.students}
-                      </td>
-
-                      <td className="px-4 py-4">
-                        <div className="flex items-center gap-2">
-                          <div className="h-2 w-28 overflow-hidden rounded-full bg-slate-100">
-                            <div
-                              className="h-full bg-emerald-600"
-                              style={{ width: `${l.completion}%` }}
-                            />
-                          </div>
-                          <span
-                            className={[
-                              "text-sm font-semibold",
-                              l.completion > 0
-                                ? "text-emerald-700"
-                                : "text-slate-500",
-                            ].join(" ")}
+                        <div className="flex shrink-0 items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => openEditLesson(l)}
+                            className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-60"
+                            disabled={mutating || savingLesson}
                           >
-                            {l.completion}%
-                          </span>
+                            Sửa
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteLesson(l.id)}
+                            className="h-10 rounded-xl border border-red-200 bg-red-50 px-4 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:opacity-60"
+                            disabled={mutating || deletingLessonId === l.id}
+                          >
+                            {deletingLessonId === l.id ? "Đang xóa..." : "Xóa"}
+                          </button>
                         </div>
-                      </td>
-
-                      <td className="px-4 py-4">
-                        <span
-                          className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${badgeByStatus(
-                            l.status
-                          )}`}
-                        >
-                          {l.status}
-                        </span>
-                      </td>
-
-                      <td className="px-4 py-4 text-slate-500">
-                        {l.createdAt}
                       </td>
                     </tr>
                   ))}
@@ -856,6 +833,80 @@ export default function Lessons() {
             </div>
           </div>
         )}
+
+        {/* ===== Edit Lesson Modal ===== */}
+        <Modal
+          open={editOpen}
+          title="Sửa bài học"
+          onClose={closeEditLesson}
+        >
+          <FormProvider {...editForm}>
+            <form onSubmit={submitEditLesson} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <Input
+                  name="IDBaiHoc"
+                  label="ID Bài học"
+                  placeholder="IDBaiHoc"
+                  rules={{ required: { value: true, message: "Bắt buộc" } }}
+                />
+
+                <DropdownSelectPortal
+                  name="IDChuDe"
+                  label="Chủ đề"
+                  placeholder="-- Chọn chủ đề --"
+                  options={categoryOptions}
+                  disabled={savingLesson || loadingCategories}
+                  closeOnSelect
+                  offset={8}
+                  placement="bottom"
+                  maxMenuHeight={320}
+                  menuWidth="28rem"
+                  triggerWidth="100%"
+                  viewportPadding={16}
+                  zIndex={1200}
+                  rules={{ required: "Vui lòng chọn chủ đề." }}
+                  triggerClassName="h-11 focus:border-amber-400 focus:ring-4 focus:ring-amber-100"
+                />
+              </div>
+
+              <Input
+                name="TenBaiHoc"
+                label="Tên bài học"
+                placeholder="Nhập tên bài học"
+                rules={{ required: { value: true, message: "Bắt buộc" } }}
+                inputClassName="focus:border-amber-400 focus:ring-4 focus:ring-amber-100"
+              />
+
+              <div>
+                <label className="block text-sm font-medium">Nội dung bài học</label>
+                <textarea
+                  className="mt-1 w-full min-h-[140px] outline-none border border-[#e0e0e0] px-4 py-2 rounded-xl placeholder:text-slate-600 focus:border-amber-400 focus:ring-4 focus:ring-amber-100"
+                  placeholder='Nhập JSON tiptap hoặc text...'
+                  value={editForm.watch("NoiDungBaiHoc") || ""}
+                  onChange={(e) => editForm.setValue("NoiDungBaiHoc", e.target.value)}
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={closeEditLesson}
+                  disabled={savingLesson}
+                  className="h-11 rounded-xl border border-slate-200 bg-white px-5 font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingLesson}
+                  className="h-11 rounded-xl bg-black px-6 font-semibold text-white disabled:opacity-60"
+                >
+                  {savingLesson ? "Đang lưu..." : "Lưu thay đổi"}
+                </button>
+              </div>
+            </form>
+          </FormProvider>
+        </Modal>
       </ContentLayoutWrapper>
     </FormProvider>
   );

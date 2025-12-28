@@ -37,6 +37,8 @@ export default [
       route(`questions`, "routes/teacher/questions.tsx"),
       route(`questions/:IDCauHoi`, "routes/teacher/edit-question.tsx"),
       route(`exams/:IDDeThi`, "routes/teacher/edit-exam.tsx"),
+      route(`exam-schedule`, "routes/teacher/exam-schedule.tsx"),
+      route(`exam-schedule-create-new`, "routes/teacher/create-exam-schedule.tsx"),
     ]),
   ]),
 ] satisfies RouteConfig;

@@ -6,6 +6,7 @@ import { DropdownSelectPortal } from "elements/dropdown/dropdown";
 import { ContentLayoutWrapper } from "~/layouts/admin-layout/items/content-layout-wrapper";
 import { http } from "utils/libs/https";
 import { Modal } from "elements/modal/modal";
+import { useAuth } from "hooks/useAuth";
 
 /** =======================
  * API Types (theo response backend)
@@ -315,6 +316,7 @@ type EditClassForm = {
 };
 
 export default function Class(): JSX.Element {
+  const { user } = useAuth();
   const forms = useForm<FormValues>({
     defaultValues: { class: "", search_class: "", search_student: "" },
   });
@@ -348,7 +350,12 @@ export default function Class(): JSX.Element {
         http.get<Paginated<LopHocApi>>("/api/classes/lop-hoc/"),
         http.get<Paginated<TeacherItem>>("/api/auth/teachers/"),
       ]);
-      setRawClasses(clsRes.data.results ?? []);
+      setRawClasses(
+        clsRes.data.results?.filter(
+          (item) => item?.IDGiaoVien_detail?.TaiKhoan_detail?.Email === user?.Email
+        ) ?? []
+      );
+      // setRawClasses(clsRes.data.results ?? []);
       setTeachers(tRes.data.results ?? []);
     } catch (e: any) {
       setErrMsg(getApiErrorMessage(e));
@@ -359,7 +366,7 @@ export default function Class(): JSX.Element {
 
   useEffect(() => {
     fetchAll();
-  }, []);
+  }, [user]);
 
   /** ===== Map API -> UI ===== */
   const classData = useMemo<ClassItem[]>(() => {

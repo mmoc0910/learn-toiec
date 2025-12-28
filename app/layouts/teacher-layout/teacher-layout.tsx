@@ -36,6 +36,14 @@ export const SIDEBAR_MENU: SidebarMenuItem[] = [
       { id: "exams-create", label: "Tạo mới đề thi", href: "/teacher/exam-create-new" },
     ],
   },
+  {
+    id: "exam-schedule",
+    label: "Lịch thi",
+    children: [
+      { id: "exam-schedule", label: "Lịch thi", href: "/teacher/exam-schedule" },
+      { id: "exam-schedule-create", label: "Tạo mới lịch thi", href: "/teacher/exam-schedule-create-new" },
+    ],
+  },
   // {
   //   id: "statistics",
   //   label: "Thống kê lớp học",

@@ -151,7 +151,7 @@ export function Modal({
       width: computedWidth,
       minWidth: toCssSize(minWidth),
       maxWidth: maxW,
-      maxHeight: maxH,
+      maxHeight: maxH, // ✅ giới hạn chiều cao của modal
     };
   }, [width, minWidth, padding]);
 
@@ -161,6 +161,8 @@ export function Modal({
     <div
       className={cn(
         "fixed inset-0 flex items-center justify-center bg-black/50",
+        // ✅ optional: giúp một số browser tính overflow tốt hơn
+        "min-h-0",
         // overlay fade
         "transition-opacity ease-out",
         animateIn ? "opacity-100" : "opacity-0",
@@ -177,6 +179,8 @@ export function Modal({
       <div
         className={cn(
           "bg-white rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.35)] overflow-hidden",
+          // ✅ quan trọng: chia layout header/body/footer, và cho phép body scroll đúng
+          "flex flex-col min-h-0",
           // content fade + slide + scale
           "transition-all ease-out",
           animateIn
@@ -215,7 +219,13 @@ export function Modal({
           </div>
         )}
 
-        <div className={cn("px-6 py-5 overflow-auto", bodyClassName)}>
+        {/* ✅ body: chiếm phần còn lại + cho phép scroll */}
+        <div
+          className={cn(
+            "px-6 py-5 flex-1 min-h-0 overflow-auto",
+            bodyClassName
+          )}
+        >
           {children}
         </div>
 

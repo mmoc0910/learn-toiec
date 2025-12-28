@@ -207,7 +207,7 @@ export function CreateTeacherModal({ open, onClose, onCreated }: Props) {
         <form
           id="create-teacher-form"
           onSubmit={handleSubmit(onSubmit)}
-          className="space-y-5"
+          className="space-y-5 overflow-auto"
         >
           {/* Thông tin tài khoản */}
           <div className="rounded-2xl border border-slate-200 p-4">

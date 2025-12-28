@@ -11,7 +11,6 @@ import { getQuestions, type QuestionItem } from "api/question-api";
 import { createExam, type CreateExamPayload } from "api/exam-api";
 import { TiptapViewer } from "components/tiptap-viewer";
 import { minutesToTimeString } from "utils/helpers/helpers";
-import { nav } from "framer-motion/client";
 import { useNavigate } from "react-router";
 
 // ===== Types =====
@@ -63,7 +62,7 @@ function labelLoai(loai: string) {
   return loai;
 }
 
-// TipTap JSON -> text preview
+// TipTap JSON -> text preview (fallback)
 function tiptapToText(node: any): string {
   if (!node) return "";
   if (typeof node === "string") return node;
@@ -75,8 +74,34 @@ function tiptapToText(node: any): string {
   return "";
 }
 
+function shuffle<T>(arr: T[]): T[] {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function askHowMany(max: number) {
+  // ✅ yêu cầu: trước khi random phải hỏi muốn random bao nhiêu câu
+  const raw = window.prompt(`Sếp muốn random bao nhiêu câu? (1 - ${max})`, `${Math.min(10, max)}`);
+  if (raw == null) return null; // cancel
+  const n = Number(raw);
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
+    window.alert("Vui lòng nhập số nguyên dương.");
+    return null;
+  }
+  if (n > max) {
+    window.alert(`Số câu random không được vượt quá ${max}.`);
+    return null;
+  }
+  return n;
+}
+
 export default function CreateExamPage() {
-    const navigate = useNavigate();
+  const navigate = useNavigate();
+
   const forms = useForm<FormValues>({
     defaultValues: {
       IDDeThi: `dethi_${Date.now()}`,
@@ -137,17 +162,14 @@ export default function CreateExamPage() {
     (async () => {
       try {
         setLoadingTeachers(true);
-        const res = await http.get<PaginatedRes<TeacherItem>>(
-          "/api/auth/teachers/"
-        );
+        const res = await http.get<PaginatedRes<TeacherItem>>("/api/auth/teachers/");
         if (!mounted) return;
 
         const list = res.data.results || [];
         setTeachers(list);
 
         const cur = forms.getValues("IDGiaoVien");
-        if (!cur && list.length)
-          forms.setValue("IDGiaoVien", list[0].GiaoVienID);
+        if (!cur && list.length) forms.setValue("IDGiaoVien", list[0].GiaoVienID);
       } catch (err: any) {
         if (!mounted) return;
         setErrorMsg(getApiErrorMessage(err));
@@ -162,7 +184,7 @@ export default function CreateExamPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ===== Load ALL questions once (NO server params) =====
+  // ===== Load ALL questions once =====
   useEffect(() => {
     let mounted = true;
 
@@ -171,10 +193,7 @@ export default function CreateExamPage() {
       setSuccessMsg("");
       try {
         setLoadingQuestions(true);
-
-        // ✅ chỉ fetch 1 lần, không truyền params
         const data = await getQuestions();
-
         if (!mounted) return;
         setQuestions(data.results || []);
       } catch (err: any) {
@@ -233,24 +252,17 @@ export default function CreateExamPage() {
     const q = (search || "").trim().toLowerCase();
 
     return (questions || []).filter((item) => {
-      // filter bài học (client)
       if (idBaiHocFilter && item.IDBaiHoc !== idBaiHocFilter) return false;
-
-      // filter loại
       if (loaiFilter && item.LoaiCauHoi !== loaiFilter) return false;
 
-      // search
       if (!q) return true;
 
       const content =
-        typeof item.NoiDungCauHoi === "string"
-          ? item.NoiDungCauHoi
-          : tiptapToText(item.NoiDungCauHoi);
+        typeof item.NoiDungCauHoi === "string" ? item.NoiDungCauHoi : tiptapToText(item.NoiDungCauHoi);
 
-      const haystack =
-        `${item.IDCauHoi} ${item.IDBaiHoc} ${item.LoaiCauHoi} ${content}`
-          .toLowerCase()
-          .trim();
+      const haystack = `${item.IDCauHoi} ${item.IDBaiHoc} ${item.LoaiCauHoi} ${content}`
+        .toLowerCase()
+        .trim();
 
       return haystack.includes(q);
     });
@@ -270,6 +282,30 @@ export default function CreateExamPage() {
   };
 
   const clearAll = () => setSelectedIds(new Set());
+
+  /** =======================
+   * ✅ RANDOM LOGIC
+   * ======================= */
+  const randomFromFiltered = (mode: "replace" | "add") => {
+    if (!filteredQuestions.length) {
+      window.alert("Không có câu hỏi nào trong bộ lọc hiện tại để random.");
+      return;
+    }
+
+    const n = askHowMany(filteredQuestions.length);
+    if (n == null) return;
+
+    const randomPicked = shuffle(filteredQuestions).slice(0, n).map((x) => x.IDCauHoi);
+
+    setSelectedIds((prev) => {
+      if (mode === "replace") return new Set(randomPicked);
+
+      // mode === "add": cộng vào những cái đã tick sẵn
+      const next = new Set(prev);
+      randomPicked.forEach((id) => next.add(id));
+      return next;
+    });
+  };
 
   const validateBeforeSubmit = (values: FormValues) => {
     if (!values.IDDeThi?.trim()) return "Vui lòng nhập ID đề thi.";
@@ -296,7 +332,6 @@ export default function CreateExamPage() {
       const payload: CreateExamPayload = {
         IDDeThi: values.IDDeThi.trim(),
         TenDeThi: values.TenDeThi.trim(),
-        // ThoiGianLamBaiThi: values.ThoiGianLamBaiThi.trim(),
         ThoiGianLamBaiThi: minutesToTimeString(values.ThoiGianLamBaiThi),
         IDGiaoVien: values.IDGiaoVien.trim(),
         cau_hoi_ids: Array.from(selectedIds),
@@ -313,6 +348,7 @@ export default function CreateExamPage() {
         TenDeThi: "",
         ThoiGianLamBaiThi: values.ThoiGianLamBaiThi || "60",
       });
+
       navigate("/teacher/exams");
     } catch (err: any) {
       setErrorMsg(getApiErrorMessage(err));
@@ -329,9 +365,7 @@ export default function CreateExamPage() {
             <div
               className={[
                 "rounded-xl border px-4 py-3 font-semibold",
-                errorMsg
-                  ? "border-red-200 bg-red-50 text-red-700"
-                  : "border-emerald-200 bg-emerald-50 text-emerald-700",
+                errorMsg ? "border-red-200 bg-red-50 text-red-700" : "border-emerald-200 bg-emerald-50 text-emerald-700",
               ].join(" ")}
             >
               {errorMsg || successMsg}
@@ -385,8 +419,34 @@ export default function CreateExamPage() {
 
           {/* ===== Filters (client only) ===== */}
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_4px_0_0_rgba(143,156,173,0.2)] space-y-4">
-            <div className="text-lg font-bold text-slate-800">
-              Chọn câu hỏi ({selectedIds.size} đã chọn)
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <div className="text-lg font-bold text-slate-800">Chọn câu hỏi</div>
+                <div className="mt-1 text-sm font-semibold text-slate-600">{selectedIds.size} đã chọn</div>
+              </div>
+
+              {/* ✅ Random buttons */}
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => randomFromFiltered("replace")}
+                  className="h-10 rounded-xl bg-black px-4 font-semibold text-white hover:opacity-95 disabled:opacity-60"
+                  disabled={filteredQuestions.length === 0}
+                  title="Random theo bộ lọc hiện tại và thay thế toàn bộ lựa chọn"
+                >
+                  Random câu hỏi
+                </button>
+
+                {/* <button
+                  type="button"
+                  onClick={() => randomFromFiltered("add")}
+                  className="h-10 rounded-xl border border-slate-200 bg-white px-4 font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                  disabled={filteredQuestions.length === 0}
+                  title="Random theo bộ lọc hiện tại và cộng thêm vào lựa chọn"
+                >
+                  Random (cộng thêm)
+                </button> */}
+              </div>
             </div>
 
             <div className="grid grid-cols-3 gap-4">
@@ -438,9 +498,7 @@ export default function CreateExamPage() {
               </button>
 
               <div className="ml-auto text-sm font-semibold text-slate-600">
-                {loadingQuestions
-                  ? "Đang tải câu hỏi..."
-                  : `${filteredQuestions.length} câu hỏi`}
+                {loadingQuestions ? "Đang tải câu hỏi..." : `${filteredQuestions.length} câu hỏi`}
               </div>
             </div>
           </div>
@@ -450,20 +508,13 @@ export default function CreateExamPage() {
             {filteredQuestions.map((q) => {
               const checked = selectedIds.has(q.IDCauHoi);
 
-              //   const preview =
-              //     typeof q.NoiDungCauHoi === "string"
-              //       ? q.NoiDungCauHoi
-              //       : tiptapToText(q.NoiDungCauHoi);
-
               return (
                 <label
                   key={q.IDCauHoi}
                   className={[
                     "block w-full cursor-pointer rounded-2xl border bg-white p-5",
                     "shadow-[0_4px_0_0_rgba(143,156,173,0.2)]",
-                    checked
-                      ? "border-violet-300 ring-4 ring-violet-100"
-                      : "border-slate-200 hover:bg-slate-50",
+                    checked ? "border-violet-300 ring-4 ring-violet-100" : "border-slate-200 hover:bg-slate-50",
                   ].join(" ")}
                 >
                   <div className="flex items-start gap-4">
@@ -476,9 +527,7 @@ export default function CreateExamPage() {
 
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <div className="text-base font-bold text-slate-800">
-                          {q.IDCauHoi}
-                        </div>
+                        <div className="text-base font-bold text-slate-800">{q.IDCauHoi}</div>
 
                         <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700">
                           {labelLoai(q.LoaiCauHoi)}
@@ -490,8 +539,12 @@ export default function CreateExamPage() {
                       </div>
 
                       <div className="mt-2 font-medium text-slate-700 wrap-break-word">
-                        {/* {preview || <span className="text-slate-400">-</span>} */}
-                        <TiptapViewer content={JSON.parse(q.NoiDungCauHoi)} />
+                        {/* Nếu NoiDungCauHoi là JSON string */}
+                        {typeof q.NoiDungCauHoi === "string" ? (
+                          <TiptapViewer content={JSON.parse(q.NoiDungCauHoi)} />
+                        ) : (
+                          <span>{tiptapToText(q.NoiDungCauHoi)}</span>
+                        )}
                       </div>
 
                       {q.LoaiCauHoi === "nghe" && q.FileNghe_url ? (
@@ -502,8 +555,7 @@ export default function CreateExamPage() {
                         </div>
                       ) : null}
 
-                      {q.LoaiCauHoi === "tracnghiem" &&
-                      (q.lua_chon || []).length ? (
+                      {q.LoaiCauHoi === "tracnghiem" && (q.lua_chon || []).length ? (
                         <div className="mt-3 grid grid-cols-2 gap-2">
                           {q.lua_chon.map((c) => (
                             <div
