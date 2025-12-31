@@ -352,7 +352,8 @@ export default function Class(): JSX.Element {
       ]);
       setRawClasses(
         clsRes.data.results?.filter(
-          (item) => item?.IDGiaoVien_detail?.TaiKhoan_detail?.Email === user?.Email
+          (item) =>
+            item?.IDGiaoVien_detail?.TaiKhoan_detail?.Email === user?.Email
         ) ?? []
       );
       // setRawClasses(clsRes.data.results ?? []);
@@ -722,6 +723,12 @@ export default function Class(): JSX.Element {
                 placeholder="Tìm học viên..."
                 inputClassName="focus:ring-4 focus:ring-violet-100"
               />
+              <button
+                type="button"
+                className="h-10 rounded-xl bg-violet-600 px-4 font-semibold text-white hover:bg-violet-700"
+              >
+                + Thêm học viên
+              </button>
             </div>
           </div>
 

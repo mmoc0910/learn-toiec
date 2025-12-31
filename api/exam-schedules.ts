@@ -24,13 +24,17 @@ type ExamQuestionChoice = {
 type ExamQuestionDetail = {
   IDCauHoi: string;
   IDBaiHoc: string;
-  NoiDungCauHoi: string; // tiptap json string
-  LoaiCauHoi: "tracnghiem" | "nghe" | "tuluan" | string;
+  NoiDungCauHoi: string;
+  LoaiCauHoi: "tracnghiem" | "nghe" | "tuluan" | "sapxeptu" | "khoptu" | string;
   GiaiThich: string | null;
   FileNghe_url: string | null;
   FileNghe_download_url?: string | null;
   FileHinhAnh_url?: string | null;
   lua_chon: ExamQuestionChoice[];
+
+  // ✅ thêm 2 loại mới (nếu backend trả về)
+  tu_sap_xep?: { IDTu: string; NoiDungTu: string; ThuTuDung: number }[];
+  cap_tu_khop?: { IDCapTu: string; TuBenTrai: string; TuBenPhai: string; LaDung: boolean }[];
 };
 
 type ExamChiTiet = {

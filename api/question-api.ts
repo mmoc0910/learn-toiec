@@ -1,5 +1,8 @@
 import { http } from "utils/libs/https";
 
+/** ======================
+ * Types
+ * ====================== */
 export type UploadAudioRes = {
   url: string;
   filename: string;
@@ -7,22 +10,50 @@ export type UploadAudioRes = {
   message: string;
 };
 
+export type QuestionType =
+  | "tracnghiem"
+  | "nghe"
+  | "tuluan"
+  | "sapxeptu"
+  | "khoptu";
+
+export type TracNghiemChoice = {
+  LuaChonID: string;
+  NoiDungLuaChon: string;
+  DapAnDung: boolean;
+};
+
+export type SapXepTuItem = {
+  IDTu: string;
+  NoiDungTu: string;
+  ThuTuDung: number;
+};
+
+export type KhopTuPair = {
+  IDCapTu: string;
+  TuBenTrai: string;
+  TuBenPhai: string;
+  LaDung: boolean;
+};
+
 export type CreateQuestionPayload = {
   IDCauHoi: string;
   IDBaiHoc: string;
   NoiDungCauHoi: string;
-  LoaiCauHoi: "tracnghiem" | "nghe" | "tuluan";
+  LoaiCauHoi: QuestionType;
   GiaiThich?: string | null;
 
-  // chỉ dùng cho "nghe"
+  // nghe
   FileNghe_url?: string | null;
 
-  // chỉ dùng cho "tracnghiem"
-  lua_chon_data?: Array<{
-    LuaChonID: string;
-    NoiDungLuaChon: string;
-    DapAnDung: boolean;
-  }>;
+  // tracnghiem | nghe
+  lua_chon_data?: TracNghiemChoice[];
+
+  // sapxeptu
+  tu_sap_xep_data?: SapXepTuItem[];
+
+  // khoptu
+  cap_tu_khop_data?: KhopTuPair[];
 };
 
 export type QuestionChoice = {
@@ -36,16 +67,19 @@ export type QuestionItem = {
   IDCauHoi: string;
   IDBaiHoc: string;
   NoiDungCauHoi: string;
-  LoaiCauHoi: "tracnghiem" | "nghe" | "tuluan" | string;
+  LoaiCauHoi: QuestionType | string;
 
-  // ✅ luôn là string | null (không undefined)
   GiaiThich: string | null;
 
-  FileNghe: string | null; // backend trả null
+  FileNghe: string | null;
   FileNghe_url: string | null;
   FileNghe_download_url: string | null;
 
   lua_chon: QuestionChoice[];
+
+  // 2 loại mới (backend có trả hay không tùy)
+  tu_sap_xep?: SapXepTuItem[];
+  cap_tu_khop?: KhopTuPair[];
 };
 
 export type PaginatedRes<T> = {
@@ -59,15 +93,21 @@ export type PatchQuestionPayload = {
   IDBaiHoc: string;
   NoiDungCauHoi: string;
 
-  // lưu ý: không cho sửa type trên UI, nhưng PATCH vẫn gửi lại type hiện tại
-  LoaiCauHoi: "tracnghiem" | "nghe" | "tuluan" | string;
+  LoaiCauHoi: QuestionType | string;
 
   GiaiThich: string | null;
 
-  // chỉ dùng cho "nghe"
   FileNghe_url?: string | null;
+
+  // nếu backend cho patch thêm các data mới thì bật dần
+  lua_chon_data?: TracNghiemChoice[];
+  tu_sap_xep_data?: SapXepTuItem[];
+  cap_tu_khop_data?: KhopTuPair[];
 };
 
+/** ======================
+ * API
+ * ====================== */
 export async function uploadAudio(file: File) {
   const form = new FormData();
   form.append("file", file);
@@ -86,16 +126,11 @@ export async function createQuestion(payload: CreateQuestionPayload) {
   return res.data;
 }
 
-/**
- * ✅ List questions
- * - params là optional (backend có thể hỗ trợ, nhưng FE có thể lọc local)
- */
 export async function getQuestions(params?: { IDBaiHoc?: string }) {
   const res = await http.get<PaginatedRes<QuestionItem>>("/api/lessons/cau-hoi/", {
     params,
   });
 
-  // ✅ normalize: đảm bảo không có undefined
   const data = res.data;
   return {
     ...data,
@@ -106,14 +141,12 @@ export async function getQuestions(params?: { IDBaiHoc?: string }) {
   };
 }
 
-/** ✅ GET detail question */
 export async function getQuestionById(id: string) {
   const res = await http.get<QuestionItem>(`/api/lessons/cau-hoi/${id}/`);
   const q = res.data;
   return { ...q, GiaiThich: q.GiaiThich ?? null };
 }
 
-/** ✅ PATCH edit question */
 export async function patchQuestionById(id: string, payload: PatchQuestionPayload) {
   const res = await http.patch(`/api/lessons/cau-hoi/${id}/`, payload);
   return res.data;

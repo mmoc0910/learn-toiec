@@ -1,6 +1,6 @@
 import { Link, useNavigate } from "react-router";
 import { FormProvider, useForm } from "react-hook-form";
-import { Input } from "elements";// sửa path theo dự án
+import { Input } from "elements"; // sửa path theo dự án
 import { registerApi } from "api/auth.api";
 
 type TRegisterForm = {
@@ -10,6 +10,23 @@ type TRegisterForm = {
   password: string;
   confirm_password: string;
 };
+
+// ✅ tạo ID ngẫu nhiên (uuid) + fallback
+function generateRandomAccountId(prefix = "user") {
+  try {
+    // đa số browser hiện đại có sẵn
+    const uuid = globalThis.crypto?.randomUUID?.();
+    if (uuid) return `${prefix}_${uuid}`;
+  } catch {
+    // ignore
+  }
+
+  // fallback: random string
+  const rand = `${Date.now()}_${Math.random().toString(16).slice(2)}_${Math.random()
+    .toString(16)
+    .slice(2)}`;
+  return `${prefix}_${rand}`;
+}
 
 export default function Register() {
   const forms = useForm<TRegisterForm>();
@@ -26,10 +43,8 @@ export default function Register() {
 
           <form
             onSubmit={forms.handleSubmit(async (data) => {
-              // clear lỗi cũ
               forms.clearErrors();
 
-              // check confirm password phía client (nhanh + rõ)
               if (data.password !== data.confirm_password) {
                 forms.setError("confirm_password", {
                   message: "Mật khẩu xác nhận không khớp!",
@@ -38,19 +53,17 @@ export default function Register() {
               }
 
               try {
-                // convert phone: chỉ lấy số
-                const phoneNumber = Number(
-                  String(data.phone).replace(/[^\d]/g, "")
-                );
-
+                const phoneNumber = Number(String(data.phone).replace(/[^\d]/g, ""));
                 if (!Number.isFinite(phoneNumber)) {
                   forms.setError("phone", { message: "Số điện thoại không hợp lệ!" });
                   return;
                 }
 
+                // ✅ IDTaiKhoan random (không lấy email nữa)
+                const randomId = generateRandomAccountId();
+
                 await registerApi({
-                  // yêu cầu: IDTaiKhoan lấy email
-                  IDTaiKhoan: data.email,
+                  IDTaiKhoan: randomId,
                   Email: data.email,
                   HoTen: data.name,
                   SoDienThoai: phoneNumber,
@@ -58,24 +71,13 @@ export default function Register() {
                   password_confirm: data.confirm_password,
                 });
 
-                // đăng ký xong -> chuyển sang login
                 navigate("/login", { replace: true });
               } catch (err: any) {
-                /**
-                 * Server trả lỗi kiểu:
-                 * {
-                 *  "IDTaiKhoan": ["..."],
-                 *  "Email": ["..."],
-                 *  "password": ["..."]
-                 * }
-                 */
                 const serverData = err?.response?.data;
 
-                // nếu lỗi dạng object field
                 if (serverData && typeof serverData === "object") {
-                  // map field backend -> field form
                   const fieldMap: Record<string, keyof TRegisterForm | "root"> = {
-                    IDTaiKhoan: "email", // IDTaiKhoan tồn tại -> báo ngay ở email
+                    IDTaiKhoan: "root", // ✅ không còn map vào email nữa
                     Email: "email",
                     HoTen: "name",
                     SoDienThoai: "phone",
@@ -89,8 +91,9 @@ export default function Register() {
                     const formField = fieldMap[key] ?? "root";
                     const messages = serverData[key];
 
-                    const messageText =
-                      Array.isArray(messages) ? messages.join(" ") : String(messages);
+                    const messageText = Array.isArray(messages)
+                      ? messages.join(" ")
+                      : String(messages);
 
                     if (formField === "root") {
                       forms.setError("root", { message: messageText });
@@ -100,15 +103,12 @@ export default function Register() {
                     }
                   }
 
-                  // nếu không map được field nào thì show lỗi chung
                   if (!hasAnyFieldError && !forms.formState.errors.root?.message) {
                     forms.setError("root", { message: "Đăng ký thất bại." });
                   }
-
                   return;
                 }
 
-                // fallback
                 forms.setError("root", {
                   message: err?.message || "Đăng ký thất bại.",
                 });
@@ -168,11 +168,8 @@ export default function Register() {
               }}
             />
 
-            {/* Lỗi chung */}
             {forms.formState.errors.root?.message ? (
-              <p className="text-red-600 text-sm">
-                {forms.formState.errors.root.message}
-              </p>
+              <p className="text-red-600 text-sm">{forms.formState.errors.root.message}</p>
             ) : null}
 
             <button
@@ -187,7 +184,7 @@ export default function Register() {
           <p>
             Đã có tài khoản?{" "}
             <Link
-              to={"/login"} 
+              to={"/login"}
               className="inline-block bg-[#FFC9F0] cursor-pointer decoration-black underline"
             >
               Đăng nhập ngay!

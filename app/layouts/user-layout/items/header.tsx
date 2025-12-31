@@ -51,6 +51,19 @@ export function Header() {
               Thư viện đề thi
             </NavLink>
           </li>
+          <li>
+            <NavLink
+              to={"/exams-result"}
+              className={({ isActive }) =>
+                cn(
+                  "inline-block font-medium capitalize px-2",
+                  isActive && "bg-[#FFE68C]"
+                )
+              }
+            >
+              Bài thi của tôi
+            </NavLink>
+          </li>
 
           {/* ===== AUTH AREA ===== */}
           {!isLoading && !accessToken && (
