@@ -127,10 +127,32 @@ function correctCount(item: KetQuaItem) {
   return (item.chi_tiet || []).filter((x) => x.LaDung).length;
 }
 
+/** ✅ parse yyyy-mm-dd -> Date local start/end day */
+function startOfDayFromYMD(ymd: string) {
+  const [y, m, d] = (ymd || "").split("-").map((n) => Number(n));
+  if (!y || !m || !d) return null;
+  return new Date(y, m - 1, d, 0, 0, 0, 0);
+}
+function endOfDayFromYMD(ymd: string) {
+  const [y, m, d] = (ymd || "").split("-").map((n) => Number(n));
+  if (!y || !m || !d) return null;
+  return new Date(y, m - 1, d, 23, 59, 59, 999);
+}
+
 type FilterForm = {
   q: string;
   classId: string; // "ALL" | IDLopHoc
   examId: string; // "ALL" | IDDeThi
+  fromDate: string; // "" | "2026-01-05"
+  toDate: string; // "" | "2026-01-05"
+};
+
+const DEFAULT_FILTERS: FilterForm = {
+  q: "",
+  classId: "ALL",
+  examId: "ALL",
+  fromDate: "",
+  toDate: "",
 };
 
 export default function MyResultsSplitPage() {
@@ -143,19 +165,20 @@ export default function MyResultsSplitPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const form = useForm<FilterForm>({
-    defaultValues: { q: "", classId: "ALL", examId: "ALL" },
+    defaultValues: DEFAULT_FILTERS,
     mode: "onChange",
   });
 
   const q = form.watch("q");
   const classId = form.watch("classId");
   const examId = form.watch("examId");
+  const fromDate = form.watch("fromDate");
+  const toDate = form.watch("toDate");
 
   // ✅ Load list kết quả của tôi
   useEffect(() => {
     let mounted = true;
 
-    // chờ token + user
     if (!accessToken || !user?.IDTaiKhoan) return;
 
     (async () => {
@@ -167,12 +190,10 @@ export default function MyResultsSplitPage() {
         );
         if (!mounted) return;
 
-        // API thường đã lọc theo token, lọc thêm cho chắc
         const mine = (res.data?.results || []).filter(
           (x) => x.HocVienID === user.IDTaiKhoan
         );
 
-        // mới nhất lên đầu
         mine.sort(
           (a, b) =>
             new Date(b.ThoiGianNopBai).getTime() -
@@ -195,7 +216,6 @@ export default function MyResultsSplitPage() {
     return () => {
       mounted = false;
     };
-    // ✅ KHÔNG đưa selectedId vào dependency để tránh loop
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken, user?.IDTaiKhoan]);
 
@@ -229,13 +249,14 @@ export default function MyResultsSplitPage() {
 
   const filtered = useMemo(() => {
     const keyword = (q || "").trim().toLowerCase();
+    const from = fromDate ? startOfDayFromYMD(fromDate) : null;
+    const to = toDate ? endOfDayFromYMD(toDate) : null;
 
     return results.filter((x) => {
       const ex = x.DeThiID_detail;
       const cls = x.LichThiID_detail?.IDLopHoc_detail;
 
       const okClass = classId === "ALL" ? true : cls?.IDLopHoc === classId;
-
       const okExam = examId === "ALL" ? true : ex?.IDDeThi === examId;
 
       const haystack = [
@@ -252,14 +273,54 @@ export default function MyResultsSplitPage() {
 
       const okSearch = keyword ? haystack.includes(keyword) : true;
 
-      return okClass && okExam && okSearch;
-    });
-  }, [results, q, classId, examId]);
+      // ✅ filter theo ngày nộp
+      let okDate = true;
+      if (from || to) {
+        const submitted = new Date(x.ThoiGianNopBai);
+        if (Number.isNaN(submitted.getTime())) okDate = false;
+        if (from && submitted < from) okDate = false;
+        if (to && submitted > to) okDate = false;
+      }
 
+      return okClass && okExam && okSearch && okDate;
+    });
+  }, [results, q, classId, examId, fromDate, toDate]);
+
+  /** ✅ FIX: selected phải dựa trên FILTERED + auto sync khi filter đổi */
+  useEffect(() => {
+    // đang loading / lỗi thì thôi
+    if (loadingList || listError) return;
+
+    // nếu filtered rỗng => clear selected
+    if (!filtered.length) {
+      if (selectedId !== null) setSelectedId(null);
+      return;
+    }
+
+    // nếu selectedId không còn nằm trong filtered => chọn item đầu tiên
+    const stillExists = selectedId
+      ? filtered.some((x) => x.KetQuaID === selectedId)
+      : false;
+
+    if (!stillExists) {
+      setSelectedId(filtered[0].KetQuaID);
+    }
+  }, [filtered, selectedId, loadingList, listError]);
+
+  /** ✅ FIX: selected lấy từ filtered */
   const selected = useMemo(() => {
     if (!selectedId) return null;
-    return results.find((x) => x.KetQuaID === selectedId) || null;
-  }, [results, selectedId]);
+    return filtered.find((x) => x.KetQuaID === selectedId) || null;
+  }, [filtered, selectedId]);
+
+  /** ✅ Reset filter button */
+  const handleResetFilters = () => {
+    form.reset(DEFAULT_FILTERS);
+
+    // sau reset -> chọn item đầu tiên của full list (nếu có)
+    if (results.length) setSelectedId(results[0].KetQuaID);
+    else setSelectedId(null);
+  };
 
   return (
     <FormProvider {...form}>
@@ -277,14 +338,31 @@ export default function MyResultsSplitPage() {
                 Tổng: <b>{results.length}</b> bài
               </div>
             </div>
+
+            {/* ✅ Nút reset filter (đặt ở header cho dễ thấy) */}
+            <button
+              type="button"
+              onClick={handleResetFilters}
+              className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold hover:border-black"
+            >
+              Reset bộ lọc
+            </button>
           </div>
 
           <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-12">
-            <div className="md:col-span-6">
+            <div className="md:col-span-5">
               <Input
                 name="q"
                 placeholder="Tìm theo tên đề, mã đề, mã lịch thi, mã kết quả, tên lớp..."
               />
+            </div>
+
+            <div className="md:col-span-2">
+              <Input name="fromDate" type="date" placeholder="Từ ngày" />
+            </div>
+
+            <div className="md:col-span-2">
+              <Input name="toDate" type="date" placeholder="Đến ngày" />
             </div>
 
             <div className="md:col-span-3">
@@ -408,7 +486,9 @@ export default function MyResultsSplitPage() {
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_0_0_rgba(143,156,173,0.12)]">
               {!selected ? (
                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-slate-700">
-                  Chọn một bài ở cột trái để xem chi tiết.
+                  {filtered.length === 0
+                    ? "Không có dữ liệu để hiển thị. Hãy điều chỉnh bộ lọc."
+                    : "Chọn một bài ở cột trái để xem chi tiết."}
                 </div>
               ) : (
                 <ResultDetailPanel item={selected} />
@@ -505,7 +585,6 @@ function ResultDetailPanel({ item }: { item: KetQuaItem }) {
                 </span>
               </div>
 
-              {/* ANSWER RENDER */}
               <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
                 <AnswerViewer ct={ct} />
               </div>
@@ -517,13 +596,12 @@ function ResultDetailPanel({ item }: { item: KetQuaItem }) {
   );
 }
 
-function AnswerViewer({ ct }: { ct: KetQuaChiTiet }) {
+function AnswerViewer({ ct }: { ct: any }) {
   const q = ct.CauHoiID_detail;
 
-  // tracnghiem/nghe => ct.LuaChon = LuaChonID
   if (q.LoaiCauHoi === "tracnghiem" || q.LoaiCauHoi === "nghe") {
-    const picked = q.lua_chon?.find((x) => x.LuaChonID === ct.LuaChon);
-    const correct = q.lua_chon?.find((x) => x.DapAnDung);
+    const picked = q.lua_chon?.find((x: any) => x.LuaChonID === ct.LuaChon);
+    const correct = q.lua_chon?.find((x: any) => x.DapAnDung);
 
     return (
       <div className="space-y-2 text-sm">
@@ -543,7 +621,6 @@ function AnswerViewer({ ct }: { ct: KetQuaChiTiet }) {
     );
   }
 
-  // tuluan => TraLoiTuLuan
   if (q.LoaiCauHoi === "tuluan") {
     return (
       <div className="text-sm">
@@ -555,17 +632,18 @@ function AnswerViewer({ ct }: { ct: KetQuaChiTiet }) {
     );
   }
 
-  // sapxeptu => LuaChon là JSON array IDTu
   if (q.LoaiCauHoi === "sapxeptu") {
     const pickedIds = safeJsonArray(ct.LuaChon);
     const pickedWords = pickedIds
-      .map((id) => q.tu_sap_xep?.find((w) => w.IDTu === id)?.NoiDungTu || id)
+      .map(
+        (id) => q.tu_sap_xep?.find((w: any) => w.IDTu === id)?.NoiDungTu || id
+      )
       .join(" ");
 
     const correctSorted = [...(q.tu_sap_xep || [])].sort(
-      (a, b) => (a.ThuTuDung ?? 0) - (b.ThuTuDung ?? 0)
+      (a: any, b: any) => (a.ThuTuDung ?? 0) - (b.ThuTuDung ?? 0)
     );
-    const correctWords = correctSorted.map((w) => w.NoiDungTu).join(" ");
+    const correctWords = correctSorted.map((w: any) => w.NoiDungTu).join(" ");
 
     return (
       <div className="space-y-2 text-sm">
@@ -583,19 +661,18 @@ function AnswerViewer({ ct }: { ct: KetQuaChiTiet }) {
     );
   }
 
-  // khoptu => LuaChon là JSON array IDCapTu
   if (q.LoaiCauHoi === "khoptu") {
     const pickedCapIds = safeJsonArray(ct.LuaChon);
     const pickedPairs = pickedCapIds
       .map((id) => {
-        const cap = q.cap_tu_khop?.find((c) => c.IDCapTu === id);
+        const cap = q.cap_tu_khop?.find((c: any) => c.IDCapTu === id);
         return cap ? `${cap.TuBenTrai} ↔ ${cap.TuBenPhai}` : id;
       })
       .join("\n");
 
     const correctPairs = (q.cap_tu_khop || [])
-      .filter((c) => c.LaDung)
-      .map((c) => `${c.TuBenTrai} ↔ ${c.TuBenPhai}`)
+      .filter((c: any) => c.LaDung)
+      .map((c: any) => `${c.TuBenTrai} ↔ ${c.TuBenPhai}`)
       .join("\n");
 
     return (
@@ -616,7 +693,6 @@ function AnswerViewer({ ct }: { ct: KetQuaChiTiet }) {
     );
   }
 
-  // fallback
   return (
     <div className="text-sm text-slate-700">
       Không hỗ trợ loại câu hỏi: <b>{q.LoaiCauHoi}</b>

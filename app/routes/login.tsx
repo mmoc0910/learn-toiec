@@ -31,8 +31,10 @@ export default function Login() {
                 });
 
                 // Ví dụ: điều hướng theo role sau login
-                if (me?.IDQuyen === 1) navigate("/admin/dashboard", { replace: true });
-                else if (me?.IDQuyen === 3) navigate("/teacher/dashboard", { replace: true });
+                if (me?.IDQuyen === 1)
+                  navigate("/admin/dashboard", { replace: true });
+                else if (me?.IDQuyen === 3)
+                  navigate("/teacher/dashboard", { replace: true });
                 else navigate("/", { replace: true });
               } catch {
                 // lỗi đã nằm trong hook error rồi
@@ -46,7 +48,10 @@ export default function Login() {
               placeholder="admin@example.com"
               type="email"
               rules={{
-                required: { value: true, message: "Không được bỏ trống Email!" },
+                required: {
+                  value: true,
+                  message: "Không được bỏ trống Email!",
+                },
               }}
             />
             <Input
@@ -55,7 +60,10 @@ export default function Login() {
               placeholder="Nhập mật khẩu của bạn"
               type="password"
               rules={{
-                required: { value: true, message: "Không được bỏ trống Mật khẩu!" },
+                required: {
+                  value: true,
+                  message: "Không được bỏ trống Mật khẩu!",
+                },
               }}
             />
 

@@ -33,13 +33,7 @@ type ExamQuestionDetail = {
   IDCauHoi: string;
   IDBaiHoc: string;
   NoiDungCauHoi: any;
-  LoaiCauHoi:
-    | "tracnghiem"
-    | "nghe"
-    | "tuluan"
-    | "sapxeptu"
-    | "khoptu"
-    | string;
+  LoaiCauHoi: "tracnghiem" | "nghe" | "tuluan" | "sapxeptu" | "khoptu" | string;
   GiaiThich: string | null;
   FileNghe_url: string | null;
   lua_chon: ExamQuestionChoice[];
@@ -110,7 +104,9 @@ function parseTipTap(raw: any) {
     } catch {
       return {
         type: "doc",
-        content: [{ type: "paragraph", content: [{ type: "text", text: raw }] }],
+        content: [
+          { type: "paragraph", content: [{ type: "text", text: raw }] },
+        ],
       };
     }
   }
@@ -263,7 +259,10 @@ export default function TakeExamPage() {
 
         setLichThi(matched);
 
-        const inTime = nowInRange(matched.ThoiGianBatDau, matched.ThoiGianKetThuc);
+        const inTime = nowInRange(
+          matched.ThoiGianBatDau,
+          matched.ThoiGianKetThuc
+        );
         setCanTake(inTime);
 
         if (!inTime) {
@@ -295,7 +294,10 @@ export default function TakeExamPage() {
             const sorted = [...(q.tu_sap_xep || [])].sort(
               (a, b) => (a.ThuTuDung ?? 0) - (b.ThuTuDung ?? 0)
             );
-            init[q.IDCauHoi] = { type: "sapxeptu", value: sorted.map((x) => x.IDTu) };
+            init[q.IDCauHoi] = {
+              type: "sapxeptu",
+              value: sorted.map((x) => x.IDTu),
+            };
           } else if (q.LoaiCauHoi === "khoptu") {
             init[q.IDCauHoi] = { type: "khoptu", value: [] };
           } else {
@@ -477,10 +479,46 @@ export default function TakeExamPage() {
     });
   }
 
+  // async function handleSubmit(isAuto = false) {
+  //   if (!exam || !lichThi) return;
+
+  //   // ✅ bắt buộc có user (nhiều backend yêu cầu)
+  //   if (!user?.IDTaiKhoan) {
+  //     alert("Bạn chưa đăng nhập hoặc chưa lấy được thông tin user.");
+  //     submittedRef.current = false;
+  //     return;
+  //   }
+
+  //   try {
+  //     const payload: NopBaiPayload = {
+  //       KetQuaID: ketQuaIdRef.current || makeId("ketqua"),
+  //       DeThiID: exam.IDDeThi,
+  //       LichThiID: lichThi.IDLichThi,
+  //       ThoiGianBatDau: startedAtRef.current || new Date().toISOString(),
+
+  //       // ✅ add user id để tránh lỗi required (backend field nào cũng OK)
+  //       HocVienID: user.IDTaiKhoan,
+  //       IDHocVien: user.IDTaiKhoan,
+
+  //       chi_tiet_data: buildChiTietData(),
+  //     };
+
+  //     // DEBUG: nếu còn lỗi, nhìn payload ngay
+  //     console.log("NOP_BAI payload =>", payload);
+
+  //     await http.post("/api/results/ket-qua/nop_bai/", payload);
+
+  //     alert(isAuto ? "Đã auto nộp bài!" : "Nộp bài thành công!");
+  //     navigate("/student/exams");
+  //   } catch (err: any) {
+  //     console.error("NOP_BAI error raw =>", err?.response?.data || err);
+  //     alert(normalizeSubmitError(err));
+  //     submittedRef.current = false;
+  //   }
+  // }
   async function handleSubmit(isAuto = false) {
     if (!exam || !lichThi) return;
 
-    // ✅ bắt buộc có user (nhiều backend yêu cầu)
     if (!user?.IDTaiKhoan) {
       alert("Bạn chưa đăng nhập hoặc chưa lấy được thông tin user.");
       submittedRef.current = false;
@@ -493,21 +531,21 @@ export default function TakeExamPage() {
         DeThiID: exam.IDDeThi,
         LichThiID: lichThi.IDLichThi,
         ThoiGianBatDau: startedAtRef.current || new Date().toISOString(),
-
-        // ✅ add user id để tránh lỗi required (backend field nào cũng OK)
         HocVienID: user.IDTaiKhoan,
         IDHocVien: user.IDTaiKhoan,
-
         chi_tiet_data: buildChiTietData(),
       };
 
-      // DEBUG: nếu còn lỗi, nhìn payload ngay
       console.log("NOP_BAI payload =>", payload);
 
-      await http.post("/api/results/ket-qua/nop_bai/", payload);
+      // ✅ BE trả về object có KetQuaID
+      const res = await http.post("/api/results/ket-qua/nop_bai/", payload);
+      const ketQuaID = res?.data?.KetQuaID || payload.KetQuaID; // fallback nếu BE không trả
 
       alert(isAuto ? "Đã auto nộp bài!" : "Nộp bài thành công!");
-      navigate("/student/exams");
+
+      // ✅ Redirect sang trang tổng kết
+      navigate(`/exams/result/${ketQuaID}`);
     } catch (err: any) {
       console.error("NOP_BAI error raw =>", err?.response?.data || err);
       alert(normalizeSubmitError(err));
@@ -616,7 +654,9 @@ export default function TakeExamPage() {
     if (current.LoaiCauHoi === "tuluan") {
       return (
         <>
-          <div className="text-sm font-bold text-slate-800">Trả lời tự luận</div>
+          <div className="text-sm font-bold text-slate-800">
+            Trả lời tự luận
+          </div>
           <textarea
             className="mt-2 min-h-36 w-full rounded-2xl border border-slate-200 p-4 text-slate-800 outline-none focus:ring-4 focus:ring-violet-100"
             placeholder="Nhập câu trả lời..."
@@ -647,7 +687,9 @@ export default function TakeExamPage() {
                   key={id}
                   className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2"
                 >
-                  <span className="text-sm font-semibold text-slate-800">{w}</span>
+                  <span className="text-sm font-semibold text-slate-800">
+                    {w}
+                  </span>
                   <div className="flex items-center gap-1">
                     <button
                       type="button"
@@ -676,7 +718,8 @@ export default function TakeExamPage() {
 
     if (current.LoaiCauHoi === "khoptu") {
       const a = answers[current.IDCauHoi];
-      const selected = a?.type === "khoptu" ? new Set(a.value) : new Set<string>();
+      const selected =
+        a?.type === "khoptu" ? new Set(a.value) : new Set<string>();
 
       return (
         <>
@@ -739,11 +782,19 @@ export default function TakeExamPage() {
       <div className="sticky top-0 z-20 mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_4px_0_0_rgba(143,156,173,0.15)]">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
-            <div className="truncate text-lg font-bold text-slate-800">{exam.TenDeThi}</div>
+            <div className="truncate text-lg font-bold text-slate-800">
+              {exam.TenDeThi}
+            </div>
             <div className="mt-1 text-sm text-slate-500">
-              User: <span className="font-semibold text-slate-700">{user?.Email || user?.IDTaiKhoan}</span> •{" "}
-              {total} câu • Đã làm:{" "}
-              <span className="font-semibold text-slate-700">{answeredCount}</span> ({percent}%)
+              User:{" "}
+              <span className="font-semibold text-slate-700">
+                {user?.Email || user?.IDTaiKhoan}
+              </span>{" "}
+              • {total} câu • Đã làm:{" "}
+              <span className="font-semibold text-slate-700">
+                {answeredCount}
+              </span>{" "}
+              ({percent}%)
             </div>
           </div>
 
@@ -776,7 +827,10 @@ export default function TakeExamPage() {
         </div>
 
         <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-100">
-          <div className="h-full bg-violet-600 transition-all" style={{ width: `${percent}%` }} />
+          <div
+            className="h-full bg-violet-600 transition-all"
+            style={{ width: `${percent}%` }}
+          />
         </div>
       </div>
 
@@ -815,8 +869,8 @@ export default function TakeExamPage() {
                       active
                         ? "border-violet-300 bg-violet-50 text-violet-700"
                         : done
-                        ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                          : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
                     ].join(" ")}
                     title={`${typeLabel(q.LoaiCauHoi)} • ${q.IDCauHoi}`}
                   >
@@ -831,7 +885,9 @@ export default function TakeExamPage() {
         {/* RIGHT */}
         <div className="lg:col-span-8">
           {!current ? (
-            <div className="rounded-2xl border border-slate-200 bg-white p-6">Không có câu hỏi.</div>
+            <div className="rounded-2xl border border-slate-200 bg-white p-6">
+              Không có câu hỏi.
+            </div>
           ) : (
             <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_4px_0_0_rgba(143,156,173,0.15)]">
               <div className="flex flex-wrap items-start justify-between gap-3">
@@ -851,7 +907,9 @@ export default function TakeExamPage() {
 
               {current.LoaiCauHoi === "nghe" && current.FileNghe_url ? (
                 <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
-                  <div className="mb-2 text-sm font-bold text-slate-700">Nghe audio</div>
+                  <div className="mb-2 text-sm font-bold text-slate-700">
+                    Nghe audio
+                  </div>
                   <audio controls className="w-full">
                     <source src={current.FileNghe_url} />
                   </audio>
@@ -874,7 +932,9 @@ export default function TakeExamPage() {
                   <button
                     type="button"
                     onClick={() => {
-                      const ok = window.confirm("Sếp chắc chắn muốn nộp bài không?");
+                      const ok = window.confirm(
+                        "Sếp chắc chắn muốn nộp bài không?"
+                      );
                       if (ok) {
                         submittedRef.current = true;
                         void handleSubmit(false);
@@ -898,7 +958,8 @@ export default function TakeExamPage() {
 
               {current.GiaiThich ? (
                 <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-                  <span className="font-bold">Gợi ý/giải thích:</span> {current.GiaiThich}
+                  <span className="font-bold">Gợi ý/giải thích:</span>{" "}
+                  {current.GiaiThich}
                 </div>
               ) : null}
             </div>
