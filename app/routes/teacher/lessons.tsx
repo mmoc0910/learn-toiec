@@ -6,6 +6,9 @@ import { http } from "utils/libs/https";
 import { ContentLayoutWrapper } from "~/layouts/admin-layout/items/content-layout-wrapper";
 import { DropdownSelectPortal } from "elements/dropdown/dropdown";
 import { useAuth } from "hooks/useAuth";
+import { SimpleEditor } from "~/components/tiptap-templates/simple/simple-editor";
+import { Modal } from "elements/modal/modal";
+
 
 /** =======================
  *  Types
@@ -27,7 +30,7 @@ type LessonApi = {
   IDChuDe: string;
   IDChuDe_detail: string; // tên chủ đề
   TenBaiHoc: string;
-  NoiDungBaiHoc: string;
+  NoiDungBaiHoc: string; // tiptap json string hoặc text
   IDCauHoi: string | null;
   cau_hoi: any[];
 };
@@ -78,7 +81,7 @@ type EditLessonFormValues = {
   IDBaiHoc: string;
   IDChuDe: string;
   TenBaiHoc: string;
-  NoiDungBaiHoc: string;
+  content: any; // SimpleEditor output (JSONContent hoặc string)
 };
 
 const defaultConfig: Config = {
@@ -150,52 +153,28 @@ function getApiErrorMessage(err: any) {
   return "Có lỗi xảy ra.";
 }
 
-/** =======================
- *  Modal (simple)
- *  ======================= */
-function Modal({
-  open,
-  title,
-  onClose,
-  children,
-}: {
-  open: boolean;
-  title: string;
-  onClose: () => void;
-  children: React.ReactNode;
-}) {
-  if (!open) return null;
+// ✅ Parse NoiDungBaiHoc (string) -> object JSON cho SimpleEditor (hoặc text nếu không phải JSON)
+function safeParseTiptapContent(input: unknown) {
+  if (input == null) return null;
+  if (typeof input === "object") return input;
+  if (typeof input !== "string") return null;
 
-  return (
-    <div className="fixed inset-0 z-[999] flex items-center justify-center p-4">
-      <button
-        type="button"
-        className="absolute inset-0 bg-black/40"
-        onClick={onClose}
-        aria-label="Close modal overlay"
-      />
-      <div className="relative z-[1000] w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
-        <div className="flex items-start justify-between gap-4">
-          <div className="text-lg font-bold text-slate-800">{title}</div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-          >
-            Đóng
-          </button>
-        </div>
-        <div className="mt-5">{children}</div>
-      </div>
-    </div>
-  );
+  const s = input.trim();
+  if (!s) return "";
+
+  try {
+    return JSON.parse(s);
+  } catch {
+    return s;
+  }
 }
 
 /** =======================
  *  Page
  *  ======================= */
 export default function Lessons() {
-  const {user} = useAuth()
+  const { user } = useAuth();
+
   const forms = useForm<FormValues>({
     defaultValues: { TenChuDe: "" },
   });
@@ -205,8 +184,9 @@ export default function Lessons() {
       IDBaiHoc: "",
       IDChuDe: "",
       TenBaiHoc: "",
-      NoiDungBaiHoc: "",
+      content: null,
     },
+    mode: "onSubmit",
   });
 
   const [config, setConfig] = useState<Config>(defaultConfig);
@@ -232,10 +212,7 @@ export default function Lessons() {
 
   /** Apply config to page */
   useEffect(() => {
-    document.documentElement.style.setProperty(
-      "--page-bg",
-      config.background_color
-    );
+    document.documentElement.style.setProperty("--page-bg", config.background_color);
     document.body.style.background = config.background_color;
     document.body.style.fontFamily = `${config.font_family}, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
     document.body.style.fontSize = `${config.font_size}px`;
@@ -265,28 +242,23 @@ export default function Lessons() {
       recolorables: [
         {
           get: () => cfg.background_color || defaultConfig.background_color,
-          set: (value: string) =>
-            w.elementSdk?.setConfig({ background_color: value }),
+          set: (value: string) => w.elementSdk?.setConfig({ background_color: value }),
         },
         {
           get: () => cfg.surface_color || defaultConfig.surface_color,
-          set: (value: string) =>
-            w.elementSdk?.setConfig({ surface_color: value }),
+          set: (value: string) => w.elementSdk?.setConfig({ surface_color: value }),
         },
         {
           get: () => cfg.text_color || defaultConfig.text_color,
-          set: (value: string) =>
-            w.elementSdk?.setConfig({ text_color: value }),
+          set: (value: string) => w.elementSdk?.setConfig({ text_color: value }),
         },
         {
           get: () => cfg.primary_color || defaultConfig.primary_color,
-          set: (value: string) =>
-            w.elementSdk?.setConfig({ primary_color: value }),
+          set: (value: string) => w.elementSdk?.setConfig({ primary_color: value }),
         },
         {
           get: () => cfg.secondary_color || defaultConfig.secondary_color,
-          set: (value: string) =>
-            w.elementSdk?.setConfig({ secondary_color: value }),
+          set: (value: string) => w.elementSdk?.setConfig({ secondary_color: value }),
         },
       ],
       borderables: [],
@@ -303,10 +275,7 @@ export default function Lessons() {
     const mapToEditPanelValues = (cfg: Partial<Config>) =>
       new Map<string, unknown>([
         ["page_title", cfg.page_title || defaultConfig.page_title],
-        [
-          "search_placeholder",
-          cfg.search_placeholder || defaultConfig.search_placeholder,
-        ],
+        ["search_placeholder", cfg.search_placeholder || defaultConfig.search_placeholder],
       ]);
 
     w.elementSdk.init({
@@ -425,8 +394,7 @@ export default function Lessons() {
     const kw = categoryKeyword.trim().toLowerCase();
     if (!kw) return categories;
     return categories.filter(
-      (c) =>
-        c.name.toLowerCase().includes(kw) || c.id.toLowerCase().includes(kw)
+      (c) => c.name.toLowerCase().includes(kw) || c.id.toLowerCase().includes(kw)
     );
   }, [categories, categoryKeyword]);
 
@@ -443,7 +411,6 @@ export default function Lessons() {
         label: (
           <div className="flex flex-col">
             <span className="font-semibold text-slate-800">{c.TenChuDe}</span>
-            {/* <span className="text-xs text-slate-500">ID: {c.IDChuDe}</span> */}
           </div>
         ),
         value: c.IDChuDe,
@@ -500,7 +467,7 @@ export default function Lessons() {
       IDBaiHoc: lesson.raw.IDBaiHoc,
       IDChuDe: lesson.raw.IDChuDe,
       TenBaiHoc: lesson.raw.TenBaiHoc || "",
-      NoiDungBaiHoc: lesson.raw.NoiDungBaiHoc || "",
+      content: safeParseTiptapContent(lesson.raw.NoiDungBaiHoc),
     });
 
     setEditOpen(true);
@@ -521,11 +488,18 @@ export default function Lessons() {
     setSavingLesson(true);
     setErrorMsg(null);
     try {
+      const NoiDungBaiHoc =
+        typeof data.content === "string"
+          ? data.content
+          : data.content
+            ? JSON.stringify(data.content)
+            : "";
+
       await http.patch(`/api/lessons/bai-hoc/${id}/`, {
         IDBaiHoc: data.IDBaiHoc,
         IDChuDe: data.IDChuDe,
         TenBaiHoc: data.TenBaiHoc,
-        NoiDungBaiHoc: data.NoiDungBaiHoc,
+        NoiDungBaiHoc,
       });
 
       setEditOpen(false);
@@ -536,6 +510,28 @@ export default function Lessons() {
       setSavingLesson(false);
     }
   });
+
+  /** Footer modal (đúng style page create) */
+  const editFooter = (
+    <div className="flex items-center justify-end gap-2">
+      <button
+        type="button"
+        onClick={closeEditLesson}
+        disabled={savingLesson}
+        className="h-11 rounded-xl border border-slate-200 bg-white px-5 font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+      >
+        Hủy
+      </button>
+      <button
+        type="submit"
+        form="edit-lesson-form"
+        disabled={savingLesson}
+        className="h-11 rounded-xl bg-black px-6 font-semibold text-white disabled:opacity-60"
+      >
+        {savingLesson ? "Đang lưu..." : "Lưu thay đổi"}
+      </button>
+    </div>
+  );
 
   return (
     <FormProvider {...forms}>
@@ -580,7 +576,6 @@ export default function Lessons() {
           style={{ background: config.surface_color }}
         >
           <div className="flex flex-wrap items-center gap-3">
-            {/* Search */}
             <div className="relative min-w-65 flex-1">
               <input
                 value={search}
@@ -600,9 +595,7 @@ export default function Lessons() {
         >
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <h3 className="text-lg font-bold text-slate-800">
-                Chủ đề môn học
-              </h3>
+              <h3 className="text-lg font-bold text-slate-800">Chủ đề môn học</h3>
               <p className="mt-1 text-slate-500">
                 Phân nhóm lớn và quản lý nhanh (thêm/sửa/xóa).
               </p>
@@ -672,9 +665,7 @@ export default function Lessons() {
                 >
                   <div className="flex flex-col gap-1.5">
                     <div className="font-bold text-slate-800">{cat.name}</div>
-                    <div className="text-sm text-slate-500">
-                      Bài học: {cat.lessons}
-                    </div>
+                    <div className="text-sm text-slate-500">Bài học: {cat.lessons}</div>
                     <span className="inline-flex w-fit items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
                       ID: {cat.id}
                     </span>
@@ -719,9 +710,7 @@ export default function Lessons() {
         {/* Lesson Card */}
         {!activeCategoryApi ? (
           <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-[0_4px_0_0_rgba(143,156,173,0.2)]">
-            <h3 className="mb-2 text-lg font-bold text-slate-800">
-              Chọn một chủ đề
-            </h3>
+            <h3 className="mb-2 text-lg font-bold text-slate-800">Chọn một chủ đề</h3>
             <p className="text-slate-500">
               Hãy bấm vào một chủ đề ở trên để xem và quản lý các bài học.
             </p>
@@ -729,12 +718,9 @@ export default function Lessons() {
         ) : (
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <h3 className="text-lg font-bold text-slate-800">
-                Danh sách bài học
-              </h3>
+              <h3 className="text-lg font-bold text-slate-800">Danh sách bài học</h3>
               <span className="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700">
-                {activeCategoryApi.TenChuDe} • {activeCategoryApi.so_bai_hoc}{" "}
-                bài
+                {activeCategoryApi.TenChuDe} • {activeCategoryApi.so_bai_hoc} bài
               </span>
             </div>
 
@@ -747,7 +733,7 @@ export default function Lessons() {
                     </th>
                     <th>Bài học</th>
                     <th>Chủ đề</th>
-                    <th className="w-[220px]">Action</th>
+                    <th className="w-55">Action</th>
                   </tr>
                 </thead>
 
@@ -766,12 +752,7 @@ export default function Lessons() {
                               l.iconGradient,
                             ].join(" ")}
                           >
-                            <svg
-                              width="24"
-                              height="24"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                            >
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
                               <path
                                 d="M15.536 11.293L9 4.757V19.243L15.536 12.707C15.9265 12.3165 15.9265 11.6835 15.536 11.293Z"
                                 stroke="white"
@@ -781,9 +762,7 @@ export default function Lessons() {
                           </div>
 
                           <div>
-                            <div className="font-semibold text-slate-800">
-                              {l.title}
-                            </div>
+                            <div className="font-semibold text-slate-800">{l.title}</div>
                             <div className="text-sm text-slate-500">{l.code}</div>
                           </div>
                         </div>
@@ -820,10 +799,7 @@ export default function Lessons() {
 
                   {filteredLessons.length === 0 && (
                     <tr>
-                      <td
-                        colSpan={12}
-                        className="px-4 py-10 text-center text-slate-500"
-                      >
+                      <td colSpan={12} className="px-4 py-10 text-center text-slate-500">
                         Chủ đề này chưa có bài học (hoặc không khớp bộ lọc).
                       </td>
                     </tr>
@@ -834,75 +810,65 @@ export default function Lessons() {
           </div>
         )}
 
-        {/* ===== Edit Lesson Modal ===== */}
+        {/* ===== Edit Lesson Modal (✅ dùng Modal component của sếp) ===== */}
         <Modal
           open={editOpen}
-          title="Sửa bài học"
           onClose={closeEditLesson}
+          title="Sửa bài học"
+          width="min(1100px, 100%)"
+          padding={16}
+          closeOnEsc
+          closeOnOverlayClick
+          lockBodyScroll
+          zIndex={1200}
+          footer={editFooter}
         >
           <FormProvider {...editForm}>
-            <form onSubmit={submitEditLesson} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <Input
-                  name="IDBaiHoc"
-                  label="ID Bài học"
-                  placeholder="IDBaiHoc"
-                  rules={{ required: { value: true, message: "Bắt buộc" } }}
-                />
-
-                <DropdownSelectPortal
-                  name="IDChuDe"
-                  label="Chủ đề"
-                  placeholder="-- Chọn chủ đề --"
-                  options={categoryOptions}
-                  disabled={savingLesson || loadingCategories}
-                  closeOnSelect
-                  offset={8}
-                  placement="bottom"
-                  maxMenuHeight={320}
-                  menuWidth="28rem"
-                  triggerWidth="100%"
-                  viewportPadding={16}
-                  zIndex={1200}
-                  rules={{ required: "Vui lòng chọn chủ đề." }}
-                  triggerClassName="h-11 focus:border-amber-400 focus:ring-4 focus:ring-amber-100"
-                />
-              </div>
-
+            <form id="edit-lesson-form" onSubmit={submitEditLesson} className="grid grid-cols-2 gap-5">
               <Input
-                name="TenBaiHoc"
-                label="Tên bài học"
-                placeholder="Nhập tên bài học"
+                name="IDBaiHoc"
+                label="ID Bài học"
+                placeholder="IDBaiHoc"
                 rules={{ required: { value: true, message: "Bắt buộc" } }}
                 inputClassName="focus:border-amber-400 focus:ring-4 focus:ring-amber-100"
               />
 
-              <div>
-                <label className="block text-sm font-medium">Nội dung bài học</label>
-                <textarea
-                  className="mt-1 w-full min-h-[140px] outline-none border border-[#e0e0e0] px-4 py-2 rounded-xl placeholder:text-slate-600 focus:border-amber-400 focus:ring-4 focus:ring-amber-100"
-                  placeholder='Nhập JSON tiptap hoặc text...'
-                  value={editForm.watch("NoiDungBaiHoc") || ""}
-                  onChange={(e) => editForm.setValue("NoiDungBaiHoc", e.target.value)}
+              <DropdownSelectPortal
+                name="IDChuDe"
+                label="Chủ đề"
+                placeholder="-- Chọn chủ đề --"
+                options={categoryOptions}
+                disabled={savingLesson || loadingCategories}
+                closeOnSelect
+                offset={8}
+                placement="bottom"
+                maxMenuHeight={320}
+                menuWidth="28rem"
+                triggerWidth="100%"
+                viewportPadding={16}
+                zIndex={1300} // ✅ cao hơn modal
+                rules={{ required: "Vui lòng chọn chủ đề." }}
+                triggerClassName="h-11 focus:border-amber-400 focus:ring-4 focus:ring-amber-100"
+              />
+
+              <div className="col-span-2">
+                <Input
+                  name="TenBaiHoc"
+                  label="Tên bài học"
+                  placeholder="Nhập tên bài học"
+                  rules={{ required: { value: true, message: "Bắt buộc" } }}
+                  inputClassName="focus:border-amber-400 focus:ring-4 focus:ring-amber-100"
                 />
               </div>
 
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={closeEditLesson}
-                  disabled={savingLesson}
-                  className="h-11 rounded-xl border border-slate-200 bg-white px-5 font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-                >
-                  Hủy
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingLesson}
-                  className="h-11 rounded-xl bg-black px-6 font-semibold text-white disabled:opacity-60"
-                >
-                  {savingLesson ? "Đang lưu..." : "Lưu thay đổi"}
-                </button>
+              <div className="col-span-2">
+                <SimpleEditor
+                  name="content"
+                  label="Nội dung bài học"
+                  rules={{
+                    required: { value: true, message: "Nội dung là bắt buộc" },
+                  }}
+                />
               </div>
             </form>
           </FormProvider>

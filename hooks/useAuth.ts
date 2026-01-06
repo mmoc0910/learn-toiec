@@ -1,5 +1,6 @@
 // src/hooks/useAuth.ts
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useLocation } from "react-router";
 import { getMeApi, loginApi, logoutApi } from "../api/auth.api";
 import type { MeResponse } from "../api/auth.api";
 import { authStorage } from "utils/libs/https";
@@ -8,13 +9,15 @@ type LoginInput = { email: string; password: string };
 const isBrowser = () => typeof window !== "undefined";
 
 export function useAuth() {
+  const location = useLocation();
+
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [user, setUser] = useState<MeResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refreshMe = useCallback(async () => {
-    if (!isBrowser()) return; // SSR: bỏ qua
+    if (!isBrowser()) return;
 
     const token = authStorage.getAccessToken();
     setAccessToken(token);
@@ -31,7 +34,9 @@ export function useAuth() {
       const me = await getMeApi();
       setUser(me);
     } catch (e: any) {
+      // token có thể hết hạn -> coi như logout local
       setUser(null);
+      setAccessToken(null);
       setError(
         e?.response?.data?.detail ||
           e?.response?.data?.message ||
@@ -79,10 +84,17 @@ export function useAuth() {
     setError(null);
   }, []);
 
+  // ✅ lần đầu vào app
   useEffect(() => {
-    // chỉ chạy ở client
     refreshMe();
   }, [refreshMe]);
+
+  // ✅ mỗi lần đổi URL (đổi route) => refresh lại user info
+  useEffect(() => {
+    refreshMe();
+    // location.key thay đổi mỗi navigation (kể cả cùng pathname)
+    // Nếu sếp chỉ muốn khi đổi pathname thì dùng [location.pathname]
+  }, [location.key, refreshMe]);
 
   return useMemo(
     () => ({ accessToken, user, isLoading, error, login, logout, refreshMe }),

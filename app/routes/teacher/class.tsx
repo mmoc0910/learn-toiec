@@ -55,6 +55,24 @@ type LopHocApi = {
   }>;
 
   so_hoc_vien: number;
+
+  // NOTE: bạn đang dùng filter theo item?.IDGiaoVien_detail... nên backend có thể có field này.
+  // Nếu TypeScript báo lỗi thì thêm optional vào:
+  IDGiaoVien_detail?: any;
+};
+
+type UserItem = {
+  IDTaiKhoan: string;
+  Email: string;
+  HoTen: string;
+  AnhDaiDien: string | null;
+  SoDienThoai: number | null;
+  NgayTaoTaiKhoan: string;
+  TrangThaiTaiKhoan: any | null;
+  IDQuyen: number;
+  IDQuyen_detail?: { IDQuyen: number; TenQuyen: string };
+  BiVoHieuHoa: boolean;
+  is_active: boolean;
 };
 
 type Paginated<T> = {
@@ -315,8 +333,14 @@ type EditClassForm = {
   IDGiaoVien: string;
 };
 
+type AddStudentForm = {
+  IDHocVien: string; // = IDTaiKhoan (role=2)
+  search_user: string; // keyword search trong dropdown
+};
+
 export default function Class(): JSX.Element {
   const { user } = useAuth();
+
   const forms = useForm<FormValues>({
     defaultValues: { class: "", search_class: "", search_student: "" },
   });
@@ -327,6 +351,10 @@ export default function Class(): JSX.Element {
 
   const editForms = useForm<EditClassForm>({
     defaultValues: { IDLopHoc: "", TenLopHoc: "", MoTa: "", IDGiaoVien: "" },
+  });
+
+  const addStudentForms = useForm<AddStudentForm>({
+    defaultValues: { IDHocVien: "", search_user: "" },
   });
 
   const [rawClasses, setRawClasses] = useState<LopHocApi[]>([]);
@@ -341,6 +369,12 @@ export default function Class(): JSX.Element {
   const [savingEdit, setSavingEdit] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
+  // ===== Add student modal state =====
+  const [openAddStudent, setOpenAddStudent] = useState(false);
+  const [users, setUsers] = useState<UserItem[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [addingStudent, setAddingStudent] = useState(false);
+
   /** ===== Fetch Classes + Teachers ===== */
   async function fetchAll() {
     setLoading(true);
@@ -350,13 +384,13 @@ export default function Class(): JSX.Element {
         http.get<Paginated<LopHocApi>>("/api/classes/lop-hoc/"),
         http.get<Paginated<TeacherItem>>("/api/auth/teachers/"),
       ]);
+
       setRawClasses(
         clsRes.data.results?.filter(
-          (item) =>
+          (item: any) =>
             item?.IDGiaoVien_detail?.TaiKhoan_detail?.Email === user?.Email
         ) ?? []
       );
-      // setRawClasses(clsRes.data.results ?? []);
       setTeachers(tRes.data.results ?? []);
     } catch (e: any) {
       setErrMsg(getApiErrorMessage(e));
@@ -494,8 +528,6 @@ export default function Class(): JSX.Element {
     setSavingEdit(true);
     try {
       const payload: Partial<LopHocApi> = {
-        // Nếu backend CHO đổi IDLopHoc thì mở dòng này:
-        // IDLopHoc: values.IDLopHoc.trim(),
         TenLopHoc: values.TenLopHoc.trim(),
         MoTa: values.MoTa?.trim() || "",
         IDGiaoVien: values.IDGiaoVien.trim(),
@@ -506,7 +538,6 @@ export default function Class(): JSX.Element {
         payload
       );
 
-      // update list tại chỗ
       setRawClasses((prev) =>
         prev.map((c) => (c.IDLopHoc === id ? { ...c, ...res.data } : c))
       );
@@ -549,6 +580,106 @@ export default function Class(): JSX.Element {
     }
   }
 
+  /** =======================
+   * USERS: fetch + options (role=2)
+   * ======================= */
+  async function fetchUsers() {
+    setLoadingUsers(true);
+    try {
+      const res = await http.get<Paginated<UserItem>>("/api/auth/users/");
+
+      // Lưu ý: bạn có thể bỏ filter is_active/BiVoHieuHoa nếu muốn add cả user bị vô hiệu hoá
+      const list = (res.data.results ?? [])
+        .filter((u) => u.IDQuyen === 2) // chỉ học viên
+        .filter((u) => u.is_active !== false)
+        .filter((u) => u.BiVoHieuHoa !== true);
+
+      setUsers(list);
+    } catch (e: any) {
+      alert(getApiErrorMessage(e));
+    } finally {
+      setLoadingUsers(false);
+    }
+  }
+
+  // Set ID học viên đã có trong lớp (để ẩn khỏi dropdown)
+  const existedStudentIdSet = useMemo(() => {
+    const set = new Set<string>();
+    (selectedClassApi?.hoc_vien ?? []).forEach((hv) => {
+      if (hv?.IDHocVien) set.add(hv.IDHocVien);
+    });
+    return set;
+  }, [selectedClassApi?.hoc_vien]);
+
+  // Keyword search trong modal add student
+  const addStudentKeyword = addStudentForms.watch("search_user") || "";
+
+  // Options học viên: chỉ role=2 + CHƯA có trong lớp + match keyword
+  const studentOptions = useMemo(() => {
+    const q = addStudentKeyword.trim().toLowerCase();
+
+    const filtered = (users ?? []).filter((u) => {
+      if (!u?.IDTaiKhoan) return false;
+
+      // ẩn user đã có trong lớp
+      if (existedStudentIdSet.has(u.IDTaiKhoan)) return false;
+
+      if (!q) return true;
+
+      const name = (u.HoTen ?? "").toLowerCase();
+      const email = (u.Email ?? "").toLowerCase();
+      const id = u.IDTaiKhoan.toLowerCase();
+
+      return (
+        name.includes(q) ||
+        email.includes(q) ||
+        id.includes(q)
+      );
+    });
+
+    return [
+      { label: "Chọn học viên", value: "" },
+      ...filtered.map((u) => ({
+        label: `${u.HoTen || u.IDTaiKhoan} • ${u.Email || "-"}`,
+        value: u.IDTaiKhoan,
+      })),
+    ];
+  }, [users, existedStudentIdSet, addStudentKeyword]);
+
+  /** =======================
+   * ADD STUDENT (PATCH)
+   * ======================= */
+  async function handleAddStudent(values: AddStudentForm) {
+    const classId = selectedId;
+    const studentId = values.IDHocVien?.trim();
+
+    if (!classId) return alert("Chưa chọn lớp.");
+    if (!studentId) return alert("❗ Vui lòng chọn học viên.");
+
+    // chặn add trùng (đã ẩn khỏi dropdown, nhưng vẫn check cho chắc)
+    if (existedStudentIdSet.has(studentId)) {
+      return alert("Học viên này đã có trong lớp.");
+    }
+
+    setAddingStudent(true);
+    try {
+      await http.patch(`/api/classes/chi-tiet-lop-hoc/${classId}/`, {
+        IDHocVien: studentId,
+      });
+
+      await fetchAll(); // reload để list học viên cập nhật
+
+      addStudentForms.reset({ IDHocVien: "", search_user: "" });
+      setOpenAddStudent(false);
+
+      alert("✅ Đã thêm học viên vào lớp");
+    } catch (e: any) {
+      alert(getApiErrorMessage(e));
+    } finally {
+      setAddingStudent(false);
+    }
+  }
+
   /** ===== Modal footers ===== */
   const addFooter = (
     <div className="flex items-center justify-end gap-2">
@@ -588,6 +719,27 @@ export default function Class(): JSX.Element {
         disabled={savingEdit}
       >
         {savingEdit ? "Đang lưu..." : "Lưu thay đổi"}
+      </button>
+    </div>
+  );
+
+  const addStudentFooter = (
+    <div className="flex items-center justify-end gap-2">
+      <button
+        type="button"
+        onClick={() => setOpenAddStudent(false)}
+        className="h-10 rounded-xl border border-slate-200 bg-white px-4 font-semibold text-slate-700 hover:bg-slate-50"
+        disabled={addingStudent}
+      >
+        Huỷ
+      </button>
+      <button
+        type="button"
+        onClick={addStudentForms.handleSubmit(handleAddStudent)}
+        className="h-10 rounded-xl bg-violet-600 px-4 font-semibold text-white hover:bg-violet-700 disabled:opacity-60"
+        disabled={addingStudent}
+      >
+        {addingStudent ? "Đang thêm..." : "Thêm vào lớp"}
       </button>
     </div>
   );
@@ -723,8 +875,14 @@ export default function Class(): JSX.Element {
                 placeholder="Tìm học viên..."
                 inputClassName="focus:ring-4 focus:ring-violet-100"
               />
+
               <button
                 type="button"
+                onClick={async () => {
+                  setOpenAddStudent(true);
+                  // load users nếu chưa có
+                  if (users.length === 0) await fetchUsers();
+                }}
                 className="h-10 rounded-xl bg-violet-600 px-4 font-semibold text-white hover:bg-violet-700"
               >
                 + Thêm học viên
@@ -742,7 +900,7 @@ export default function Class(): JSX.Element {
                   <th>Tổng điểm</th>
                   <th>Tiến độ</th>
                   <th>Trạng thái</th>
-                  <th>Hành động</th>
+                  {/* <th>Hành động</th> */}
                 </tr>
               </thead>
 
@@ -778,14 +936,14 @@ export default function Class(): JSX.Element {
                       <td className="px-4 py-4">-</td>
                       <td className="px-4 py-4">-</td>
                       <td className="px-4 py-4">-</td>
-                      <td className="px-4 py-4">
+                      {/* <td className="px-4 py-4">
                         <button
                           type="button"
                           className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
                         >
                           Xem
                         </button>
-                      </td>
+                      </td> */}
                     </tr>
                   );
                 })}
@@ -871,13 +1029,11 @@ export default function Class(): JSX.Element {
             footer={editFooter}
           >
             <div className="grid grid-cols-1 gap-4">
-              {/* IDLopHoc: readonly vì patch URL theo id */}
               <Input
                 name="IDLopHoc"
                 label="IDLopHoc"
                 placeholder="IDLopHoc"
                 inputClassName="focus:ring-4 focus:ring-violet-100"
-                // disabled
               />
 
               <Input
@@ -904,15 +1060,80 @@ export default function Class(): JSX.Element {
                 disabled={loading || savingEdit}
                 zIndex={1200}
               />
+            </div>
+          </Modal>
+        </FormProvider>
 
-              {/* <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
-                PATCH{" "}
-                <span className="font-mono">
-                  /api/classes/lop-hoc/{`{IDLopHoc}`}/
-                </span>{" "}
-                với{" "}
-                <span className="font-mono">TenLopHoc, MoTa, IDGiaoVien</span>
-              </div> */}
+        {/* =======================
+         * Modal Add Student to Class (PATCH)
+         * - có search keyword
+         * - ẩn học viên đã có trong lớp
+         * ======================= */}
+        <FormProvider {...addStudentForms}>
+          <Modal
+            open={openAddStudent}
+            onClose={() => {
+              if (addingStudent) return;
+              setOpenAddStudent(false);
+            }}
+            title="Thêm học viên vào lớp"
+            width={720}
+            closeOnOverlayClick={!addingStudent}
+            closeOnEsc={!addingStudent}
+            footer={addStudentFooter}
+          >
+            <div className="grid grid-cols-1 gap-4">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                Lớp hiện tại:{" "}
+                <span className="font-semibold">
+                  {selectedClassUI?.name ?? "-"} • {selectedId || "-"}
+                </span>
+              </div>
+
+              {/* Search keyword (lọc options dropdown) */}
+              <Input
+                name="search_user"
+                type="search"
+                label="Tìm học viên"
+                placeholder="Nhập tên / email / ID tài khoản..."
+                inputClassName="focus:ring-4 focus:ring-violet-100"
+              />
+
+              <DropdownSelectPortal
+                name="IDHocVien"
+                label="Học viên"
+                placeholder={loadingUsers ? "Đang tải..." : "Chọn học viên"}
+                options={studentOptions}
+                menuWidth={560}
+                placement="bottom"
+                disabled={loadingUsers || addingStudent}
+                zIndex={12000}
+              />
+
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-sm text-slate-600">
+                  Đang hiển thị:{" "}
+                  <span className="font-semibold">
+                    {Math.max(0, studentOptions.length - 1)}
+                  </span>{" "}
+                  học viên (đã ẩn người đã có trong lớp)
+                </div>
+
+                <button
+                  type="button"
+                  onClick={fetchUsers}
+                  className="h-10 w-fit rounded-xl border border-slate-200 bg-white px-4 font-semibold text-slate-700 hover:bg-slate-50"
+                  disabled={loadingUsers || addingStudent}
+                >
+                  {loadingUsers ? "Đang tải..." : "Reload danh sách học viên"}
+                </button>
+              </div>
+
+              {Math.max(0, studentOptions.length - 1) === 0 ? (
+                <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                  Không còn học viên nào để thêm (hoặc không khớp từ khoá).
+                </div>
+              ) : null}
             </div>
           </Modal>
         </FormProvider>

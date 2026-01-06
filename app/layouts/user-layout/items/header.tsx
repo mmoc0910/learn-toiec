@@ -1,6 +1,6 @@
 import { useAuth } from "hooks/useAuth";
 import { useEffect } from "react";
-import { NavLink, useNavigate } from "react-router";
+import { Link, NavLink, useNavigate } from "react-router";
 import { cn } from "utils/helpers/class-name";
 import { getInitials } from "utils/helpers/get-initials";
 
@@ -16,7 +16,7 @@ export function Header() {
   return (
     <header className="px-5 py-3 shadow flex items-center justify-between fixed top-0 left-0 right-0 z-10 bg-white h-16">
       {/* Logo */}
-      <div className="flex items-center gap-2">
+      <Link to={"/"} className="flex items-center gap-2">
         <img
           src="/images/logo.f874abb6.png"
           alt="logo"
@@ -25,7 +25,7 @@ export function Header() {
         <span className="bg-[#9DDCFF] px-2 text-lg font-semibold">
           Turtle English
         </span>
-      </div>
+      </Link>
 
       <nav>
         <ul className="flex items-center gap-5">

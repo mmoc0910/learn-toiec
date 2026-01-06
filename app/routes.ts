@@ -13,6 +13,8 @@ export default [
     route("exams/:IDDeThi", "routes/user/exam.tsx"),
     route("exams-result", "routes/user/exam-result.tsx"),
     route("exams/result/:ketQuaID", "routes/user/exam-404.tsx"),
+    route("classes/:id", "routes/user/class-detail.tsx"),
+    route("lessons/:id", "routes/user/lesson-detail.tsx"),
     route("login", "routes/login.tsx"),
     route("register", "routes/register.tsx"),
   ]),

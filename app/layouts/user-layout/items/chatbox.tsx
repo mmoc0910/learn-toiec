@@ -152,7 +152,7 @@ export function Chatbox() {
       send();
     }
   };
-
+  if (!user?.Email) return null;
   return (
     <>
       {/* Floating Button + Badge */}
