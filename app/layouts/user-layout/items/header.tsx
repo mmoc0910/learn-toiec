@@ -107,6 +107,12 @@ export function Header() {
                   "transition-all duration-150"
                 )}
               >
+                <Link
+                  to={"update-profile"}
+                  className="block w-full text-left px-4 py-2 text-sm font-medium hover:bg-red-50 rounded-xl"
+                >
+                  Thông tin cá nhân
+                </Link>
                 <button
                   type="button"
                   onClick={handleLogout}

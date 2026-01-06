@@ -157,7 +157,7 @@ export default function Home() {
   }, [classes, myIdentifierSet]);
 
   return (
-    <div className="">
+    <div className="section-wrapper">
       <Banner />
 
       <div className="py-10" />

@@ -66,3 +66,14 @@ export async function registerApi(payload: RegisterRequest) {
 export function logoutApi() {
   authStorage.clear();
 }
+
+export type UpdateProfilePayload = {
+  HoTen?: string;
+  SoDienThoai?: number;
+  AnhDaiDien?: string;
+};
+
+export async function updateStudentProfile(payload: UpdateProfilePayload) {
+  const res = await http.patch("/api/auth/users/update_profile/", payload);
+  return res.data;
+}

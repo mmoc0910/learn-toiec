@@ -1,16 +1,13 @@
+// src/pages/admin/Dashboard.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import { ContentLayoutWrapper } from "~/layouts/admin-layout/items/content-layout-wrapper";
 import { cn } from "utils/helpers/class-name";
 import { http } from "utils/libs/https";
 
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
-
 import {
   ResponsiveContainer,
   PieChart,
   Pie,
-  Cell,
   Tooltip,
   Legend,
   BarChart,
@@ -87,54 +84,30 @@ type ExamItem = {
   };
 };
 
-// ====== RESULTS (for charts + table) ======
+// ====== RESULTS (ket-qua) ======
 type ResultItem = {
   KetQuaID: string;
-  DiemSo: number;
   DeThiID: string;
-  DeThiID_detail?: {
-    IDDeThi: string;
-    TenDeThi: string;
-    IDGiaoVien?: string;
-  };
-  HocVienID?: string;
+  DiemSo: number;
+  HocVienID: string;
+
   HocVienID_detail?: {
     TaiKhoan_detail?: {
       HoTen?: string;
       Email?: string;
     };
   };
+
+  DeThiID_detail?: {
+    TenDeThi?: string;
+  };
+
   chi_tiet?: Array<{
     LaDung?: boolean;
     CauHoiID_detail?: {
-      LoaiCauHoi?: string; // khoptu | tracnghiem | nghe | sapxeptu | tuluan ...
+      LoaiCauHoi?: string; // "khoptu" | "tracnghiem" | "sapxeptu" | "nghe" | "tuluan" | ...
     };
   }>;
-};
-
-type Row = {
-  stt: number;
-  name: string;
-  tenDe: string;
-  ghepTu: number; // số câu đúng
-  doc: number; // số câu đúng
-  nghe: number; // số câu đúng
-  tong: number; // DiemSo backend
-  dung: number;
-  tongCau: number;
-  percent: number; // % đúng
-};
-
-type ExamAgg = {
-  deThiId: string;
-  tenDe: string;
-  attempts: number;
-  totalCorrect: number;
-  totalQuestions: number;
-  avgPercent: number;
-  ghepTuCorrect: number;
-  docCorrect: number;
-  ngheCorrect: number;
 };
 
 function normalizeError(err: any): string {
@@ -161,61 +134,49 @@ function mapTrangThaiGV(trangThai?: string | null) {
   return { text: "—", tone: "neutral" as const };
 }
 
-// ===== helpers for results =====
-function getNextPage(next: string | null): number | null {
-  if (!next) return null;
-  try {
-    const u = new URL(next);
-    const p = u.searchParams.get("page");
-    return p ? Number(p) : null;
-  } catch {
-    const m = next.match(/page=(\d+)/);
-    return m ? Number(m[1]) : null;
-  }
-}
-
-async function fetchAllResults(): Promise<ResultItem[]> {
-  let page = 1;
-  const acc: ResultItem[] = [];
-
-  for (let guard = 0; guard < 400; guard++) {
-    const res = await http.get<PaginatedRes<ResultItem>>(
-      `/api/results/ket-qua/?page=${page}`
-    );
-    acc.push(...(res.data?.results || []));
-    const nextPage = getNextPage(res.data?.next || null);
-    if (!nextPage) break;
-    page = nextPage;
-  }
-  return acc;
-}
-
-function getBucket(loai?: string): "GhepTu" | "Doc" | "Nghe" | "Other" {
-  switch (loai) {
-    case "khoptu":
-      return "GhepTu";
-    case "nghe":
-      return "Nghe";
-    case "tracnghiem":
-    case "sapxeptu":
-      return "Doc";
-    default:
-      return "Other";
-  }
-}
-
-function toPercent(correct: number, total: number) {
-  if (!total) return 0;
-  return Math.round((correct / total) * 1000) / 10; // 1 decimal
-}
-
-type LevelKey = "< TB" | "TB" | "Khá" | "Giỏi";
-function classifyLevel(percent: number): LevelKey {
-  if (percent < 50) return "< TB";
-  if (percent < 65) return "TB";
-  if (percent < 80) return "Khá";
+// ====== score classification ======
+type ScoreLevel = "<TB" | "TB" | "Khá" | "Giỏi";
+function getScoreLevel(score: number): ScoreLevel {
+  // giả định thang 0-100
+  if (score < 50) return "<TB";
+  if (score < 65) return "TB";
+  if (score < 80) return "Khá";
   return "Giỏi";
 }
+
+// ====== bucket mapping ======
+type Bucket = "GhepTu" | "TracNghiem" | "SapXepTu" | "Nghe" | "Doc";
+
+function getBucket(loai?: string): Bucket {
+  if (loai === "khoptu") return "GhepTu";
+  if (loai === "tracnghiem") return "TracNghiem";
+  if (loai === "sapxeptu") return "SapXepTu";
+  if (loai === "nghe") return "Nghe";
+  return "Doc";
+}
+
+function pct(correct: number, total: number) {
+  if (!total) return 0;
+  return Math.round((correct / total) * 100);
+}
+
+type Row = {
+  stt: number;
+  name: string;
+  tenDe: string;
+
+  ghepTu: string; // "x/y"
+  tracNghiem: string;
+  sapXepTu: string; // ✅ NEW
+  nghe: string;
+  doc: string;
+
+  dungTong: string; // "x/y"
+  totalCorrect: number;
+  totalQ: number;
+
+  tong: number; // DiemSo
+};
 
 export default function Dashboard() {
   const [loading, setLoading] = useState(false);
@@ -230,10 +191,8 @@ export default function Dashboard() {
     useState<PaginatedRes<StudentItem> | null>(null);
   const [examsRes, setExamsRes] = useState<PaginatedRes<ExamItem> | null>(null);
 
-  // ✅ results state (for charts + table)
-  const [loadingResults, setLoadingResults] = useState(false);
-  const [errResults, setErrResults] = useState<string | null>(null);
-  const [results, setResults] = useState<ResultItem[]>([]);
+  const [resultsRes, setResultsRes] =
+    useState<PaginatedRes<ResultItem> | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -241,19 +200,20 @@ export default function Dashboard() {
       setLoading(true);
       setErr(null);
       try {
-        const [c, t, s, e] = await Promise.all([
+        const [c, t, s, e, r] = await Promise.all([
           http
             .get<PaginatedRes<ClassItem>>("/api/classes/lop-hoc/")
-            .then((r) => r.data),
+            .then((x) => x.data),
           http
             .get<PaginatedRes<TeacherItem>>("/api/auth/teachers/")
-            .then((r) => r.data),
+            .then((x) => x.data),
           http
             .get<PaginatedRes<StudentItem>>("/api/auth/students/")
-            .then((r) => r.data),
+            .then((x) => x.data),
+          http.get<PaginatedRes<ExamItem>>("/api/exams/de-thi/").then((x) => x.data),
           http
-            .get<PaginatedRes<ExamItem>>("/api/exams/de-thi/")
-            .then((r) => r.data),
+            .get<PaginatedRes<ResultItem>>("/api/results/ket-qua/")
+            .then((x) => x.data),
         ]);
 
         if (!mounted) return;
@@ -261,6 +221,7 @@ export default function Dashboard() {
         setTeachersRes(t);
         setStudentsRes(s);
         setExamsRes(e);
+        setResultsRes(r);
       } catch (e: any) {
         if (!mounted) return;
         setErr(normalizeError(e));
@@ -275,47 +236,24 @@ export default function Dashboard() {
     };
   }, []);
 
-  // ✅ load ALL results (admin => không lọc)
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      setLoadingResults(true);
-      setErrResults(null);
-      try {
-        const all = await fetchAllResults();
-        if (!mounted) return;
-        setResults(all);
-      } catch (e: any) {
-        if (!mounted) return;
-        setErrResults(normalizeError(e));
-      } finally {
-        if (!mounted) return;
-        setLoadingResults(false);
-      }
-    })();
-
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
   // ===== Fix lỗi BE tạm thời ở FE: lọc đúng role =====
   const studentsFiltered = useMemo(() => {
     const list = studentsRes?.results || [];
+
     const onlyStudents = list.filter((x) => {
       const role =
         x.TaiKhoan_detail?.IDQuyen ?? x.TaiKhoan_detail?.IDQuyen_detail?.IDQuyen;
-      const roleName = x.TaiKhoan_detail?.IDQuyen_detail?.TenQuyen;
 
+      const roleName = x.TaiKhoan_detail?.IDQuyen_detail?.TenQuyen;
       if (role != null) return role === 2;
       if (roleName) return roleName.toLowerCase().includes("học viên");
       return true;
     });
+
     return onlyStudents;
   }, [studentsRes]);
 
   const totalStudents = studentsFiltered.length;
-
   const totalTeachers = teachersRes?.count ?? 0;
   const totalExams = examsRes?.count ?? 0;
   const totalClasses = classesRes?.count ?? 0;
@@ -324,10 +262,12 @@ export default function Dashboard() {
   const topStudents = studentsFiltered.slice(0, 5);
   const topExams = (examsRes?.results || []).slice(0, 5);
 
-  // ====== BUILD TABLE ROWS (admin => ALL results) ======
+  // ===== results -> rows =====
   const rows: Row[] = useMemo(() => {
-    const built = (results || []).map((r, idx) => {
-      const studentName =
+    const list = resultsRes?.results || [];
+
+    return list.map((r, idx) => {
+      const name =
         r?.HocVienID_detail?.TaiKhoan_detail?.HoTen ||
         r?.HocVienID_detail?.TaiKhoan_detail?.Email ||
         r?.HocVienID ||
@@ -335,171 +275,135 @@ export default function Dashboard() {
 
       const tenDe = r?.DeThiID_detail?.TenDeThi || r?.DeThiID || "—";
 
-      let ghepTu = 0;
-      let doc = 0;
-      let nghe = 0;
-      let dung = 0;
-      let tongCau = 0;
+      const perBucket = {
+        GhepTu: { correct: 0, total: 0 },
+        TracNghiem: { correct: 0, total: 0 },
+        SapXepTu: { correct: 0, total: 0 },
+        Nghe: { correct: 0, total: 0 },
+        Doc: { correct: 0, total: 0 },
+      } satisfies Record<Bucket, { correct: number; total: number }>;
+
+      let totalCorrect = 0;
+      let totalQ = 0;
 
       for (const ct of r?.chi_tiet || []) {
-        const loai = ct?.CauHoiID_detail?.LoaiCauHoi;
-        const b = getBucket(loai);
+        const bucket = getBucket(ct?.CauHoiID_detail?.LoaiCauHoi);
+        perBucket[bucket].total += 1;
+        totalQ += 1;
 
-        tongCau += 1;
         if (ct?.LaDung) {
-          dung += 1;
-          if (b === "GhepTu") ghepTu += 1;
-          if (b === "Doc") doc += 1;
-          if (b === "Nghe") nghe += 1;
+          perBucket[bucket].correct += 1;
+          totalCorrect += 1;
         }
       }
 
-      const percent = toPercent(dung, tongCau);
+      const fmt = (b: Bucket) => `${perBucket[b].correct}/${perBucket[b].total}`;
 
       return {
         stt: idx + 1,
-        name: studentName,
+        name,
         tenDe,
-        ghepTu,
-        doc,
-        nghe,
+
+        ghepTu: fmt("GhepTu"),
+        tracNghiem: fmt("TracNghiem"),
+        sapXepTu: fmt("SapXepTu"), // ✅ NEW
+        nghe: fmt("Nghe"),
+        doc: fmt("Doc"),
+
+        dungTong: `${totalCorrect}/${totalQ}`,
+        totalCorrect,
+        totalQ,
+
         tong: Number(r?.DiemSo) || 0,
-        dung,
-        tongCau,
-        percent,
       };
     });
+  }, [resultsRes]);
 
-    // sort theo tổng điểm giảm dần
-    built.sort((a, b) => b.tong - a.tong);
-    return built.map((x, i) => ({ ...x, stt: i + 1 }));
-  }, [results]);
+  // ===== chart: score distribution =====
+  const scorePieData = useMemo(() => {
+    const counts: Record<ScoreLevel, number> = { "<TB": 0, TB: 0, Khá: 0, Giỏi: 0 };
 
-  // ====== AGG BY EXAM (admin => ALL exams in results) ======
-  const examAgg: ExamAgg[] = useMemo(() => {
-    const mp = new Map<string, ExamAgg>();
-
-    for (const r of results || []) {
-      const deThiId = r?.DeThiID || "—";
-      const tenDe = r?.DeThiID_detail?.TenDeThi || r?.DeThiID || "—";
-
-      let totalQuestions = 0;
-      let totalCorrect = 0;
-
-      let ghepTuCorrect = 0;
-      let docCorrect = 0;
-      let ngheCorrect = 0;
-
-      for (const ct of r?.chi_tiet || []) {
-        const loai = ct?.CauHoiID_detail?.LoaiCauHoi;
-        const b = getBucket(loai);
-
-        totalQuestions += 1;
-        if (ct?.LaDung) {
-          totalCorrect += 1;
-          if (b === "GhepTu") ghepTuCorrect += 1;
-          if (b === "Doc") docCorrect += 1;
-          if (b === "Nghe") ngheCorrect += 1;
-        }
-      }
-
-      const cur =
-        mp.get(deThiId) ||
-        ({
-          deThiId,
-          tenDe,
-          attempts: 0,
-          totalCorrect: 0,
-          totalQuestions: 0,
-          avgPercent: 0,
-          ghepTuCorrect: 0,
-          docCorrect: 0,
-          ngheCorrect: 0,
-        } as ExamAgg);
-
-      cur.attempts += 1;
-      cur.totalCorrect += totalCorrect;
-      cur.totalQuestions += totalQuestions;
-      cur.ghepTuCorrect += ghepTuCorrect;
-      cur.docCorrect += docCorrect;
-      cur.ngheCorrect += ngheCorrect;
-
-      mp.set(deThiId, cur);
+    for (const r of resultsRes?.results || []) {
+      const lv = getScoreLevel(Number(r?.DiemSo) || 0);
+      counts[lv] += 1;
     }
 
-    const arr = Array.from(mp.values()).map((x) => ({
-      ...x,
-      avgPercent: toPercent(x.totalCorrect, x.totalQuestions),
-    }));
-
-    arr.sort((a, b) => b.avgPercent - a.avgPercent);
-    return arr;
-  }, [results]);
-
-  // ====== PIE DATA (level distribution) ======
-  const levelPieData = useMemo(() => {
-    const counts: Record<LevelKey, number> = {
-      "< TB": 0,
-      TB: 0,
-      Khá: 0,
-      Giỏi: 0,
-    };
-
-    for (const r of rows) {
-      counts[classifyLevel(r.percent)] += 1;
-    }
-
-    return (Object.keys(counts) as LevelKey[]).map((k) => ({
+    return (Object.keys(counts) as ScoreLevel[]).map((k) => ({
       name: k,
       value: counts[k],
     }));
-  }, [rows]);
+  }, [resultsRes]);
 
-  // ====== EXPORT PDF ======
-  const exportPdf = () => {
-    const doc = new jsPDF({
-      orientation: "landscape",
-      unit: "pt",
-      format: "a4",
-    });
+  // ===== chart: attempts per exam (top 10) =====
+  const examAttemptsBarData = useMemo(() => {
+    const map = new Map<string, { tenDe: string; count: number }>();
+
+    for (const r of resultsRes?.results || []) {
+      const tenDe = r?.DeThiID_detail?.TenDeThi || r?.DeThiID || "—";
+      const key = tenDe;
+      const cur = map.get(key);
+      if (!cur) map.set(key, { tenDe, count: 1 });
+      else cur.count += 1;
+    }
+
+    return Array.from(map.values())
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+  }, [resultsRes]);
+
+  // ===== export PDF =====
+  const exportPdf = async () => {
+    const { jsPDF } = await import("jspdf");
+    // @ts-ignore
+    const autoTable = (await import("jspdf-autotable")).default;
+
+    const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
 
     doc.setFontSize(14);
-    doc.text("BẢNG KẾT QUẢ BÀI THI (ADMIN)", 40, 40);
+    doc.text("Bảng kết quả bài thi", 40, 40);
 
-    doc.setFontSize(10);
-    doc.text(`Tổng dòng: ${rows.length}`, 40, 58);
+    const head = [
+      [
+        "STT",
+        "Name",
+        "Tên đề",
+        "Ghép từ",
+        "Trắc nghiệm",
+        "Sắp xếp từ",
+        "Nghe",
+        "Đọc",
+        "Đúng/Tổng",
+        "Tổng",
+      ],
+    ];
+
+    const body = rows.map((x) => [
+      x.stt,
+      x.name,
+      x.tenDe,
+      x.ghepTu,
+      x.tracNghiem,
+      x.sapXepTu,
+      x.nghe,
+      x.doc,
+      `${x.dungTong} (${pct(x.totalCorrect, x.totalQ)}%)`,
+      x.tong,
+    ]);
 
     autoTable(doc, {
-      startY: 75,
-      head: [["STT", "Name", "Tên đề", "GhepTu", "Đọc", "Nghe", "Đúng/Tổng", "Tổng"]],
-      body: rows.map((r) => [
-        r.stt,
-        r.name,
-        r.tenDe,
-        r.ghepTu,
-        r.doc,
-        r.nghe,
-        `${r.dung}/${r.tongCau} (${r.percent}%)`,
-        r.tong,
-      ]),
-      styles: { fontSize: 9, cellPadding: 6, overflow: "linebreak" },
-      headStyles: { fillColor: [15, 23, 42], textColor: 255, fontStyle: "bold" },
+      head,
+      body,
+      startY: 60,
+      styles: { fontSize: 9, cellPadding: 6 },
+      headStyles: { fillColor: [241, 245, 249] },
       columnStyles: {
-        0: { cellWidth: 45 },
-        1: { cellWidth: 160 },
-        2: { cellWidth: 260 },
-        3: { cellWidth: 70, halign: "right" },
-        4: { cellWidth: 70, halign: "right" },
-        5: { cellWidth: 70, halign: "right" },
-        6: { cellWidth: 140 },
-        7: { cellWidth: 70, halign: "right" },
+        0: { cellWidth: 40 },
+        9: { cellWidth: 60 },
       },
     });
 
-    doc.save("ket-qua-bai-thi-admin.pdf");
+    doc.save("bang-ket-qua.pdf");
   };
-
-  const PIE_COLORS = ["#ef4444", "#f59e0b", "#3b82f6", "#22c55e"];
 
   return (
     <ContentLayoutWrapper heading="Bảng điều khiển">
@@ -619,6 +523,42 @@ export default function Dashboard() {
                 {loading ? "…" : "Bài kiểm tra"}
               </span>
               <span className="text-[13px] text-slate-500">theo hệ thống</span>
+            </div>
+          </div>
+
+          {/* Kết quả */}
+          <div
+            className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm border-l-4"
+            style={{ borderLeftColor: "#8B5CF6" }}
+          >
+            <div className="mb-4 flex items-start justify-between">
+              <div>
+                <div className="mb-2 text-sm text-slate-500">Lượt làm bài</div>
+                <div className="text-[32px] font-bold leading-none text-slate-800">
+                  {loading ? "…" : (resultsRes?.count ?? 0).toLocaleString("vi-VN")}
+                </div>
+              </div>
+
+              <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-purple-100">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+                  <path
+                    d="M4 4H20V20H4V4Z"
+                    stroke="#8B5CF6"
+                    strokeWidth="2"
+                  />
+                  <path
+                    d="M8 14L11 11L14 14L18 10"
+                    stroke="#8B5CF6"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </div>
+            </div>
+
+            <div className="text-[13px] text-slate-500">
+              *tổng số bài đã nộp
             </div>
           </div>
         </div>
@@ -786,7 +726,9 @@ export default function Dashboard() {
                             <div className="font-semibold text-slate-800">{ex.TenDeThi}</div>
                             <div className="text-xs text-slate-500">GV: {teacherName}</div>
                           </td>
-                          <td className="px-3 py-2 font-medium text-slate-800">{ex.so_cau_hoi}</td>
+                          <td className="px-3 py-2 font-medium text-slate-800">
+                            {ex.so_cau_hoi}
+                          </td>
                           <td className="px-3 py-2 text-slate-700">{ex.ThoiGianLamBaiThi}</td>
                         </tr>
                       );
@@ -806,222 +748,147 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* ===== CHARTS (ADMIN: ALL RESULTS) ===== */}
+        {/* ===== RESULTS ANALYTICS ===== */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-8">
-          {/* Pie */}
+          {/* Pie: score classification */}
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="mb-2">
-              <div className="text-lg font-bold text-slate-800">Phân loại kết quả</div>
+            <div className="mb-3">
+              <div className="text-lg font-bold text-slate-800">Phân loại điểm</div>
               <div className="text-sm text-slate-500">
-                Theo % đúng: &lt;50, 50–64, 65–79, ≥80
+                &lt;TB / TB / Khá / Giỏi
               </div>
             </div>
-
-            {errResults && (
-              <div className="mb-3 rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 whitespace-pre-wrap">
-                {errResults}
-              </div>
-            )}
-
-            {loadingResults ? (
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-slate-700">
-                Đang tải dữ liệu...
-              </div>
-            ) : rows.length === 0 ? (
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-slate-700">
-                Chưa có dữ liệu.
-              </div>
-            ) : (
-              <div className="h-72">
-                <ResponsiveContainer>
-                  <PieChart>
-                    <Pie data={levelPieData} dataKey="value" nameKey="name" outerRadius={90} label>
-                      {levelPieData.map((_, i) => (
-                        <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                    <Legend />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-            )}
+            <div className="h-64">
+              <ResponsiveContainer>
+                <PieChart>
+                  <Pie
+                    data={scorePieData}
+                    dataKey="value"
+                    nameKey="name"
+                    outerRadius={90}
+                    label
+                  />
+                  <Tooltip />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="text-xs text-slate-500">
+              *Ngưỡng: &lt;50 = &lt;TB, 50–64 = TB, 65–79 = Khá, ≥80 = Giỏi
+            </div>
           </div>
 
-          {/* Bar avg percent per exam */}
+          {/* Bar: attempts per exam */}
           <div className="lg:col-span-2 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="mb-2">
-              <div className="text-lg font-bold text-slate-800">% đúng trung bình theo đề</div>
-              <div className="text-sm text-slate-500">Trục X hiển thị tên đề</div>
+            <div className="mb-3">
+              <div className="text-lg font-bold text-slate-800">Lượt làm theo đề (Top 10)</div>
+              <div className="text-sm text-slate-500">Hiển thị label trục X</div>
             </div>
 
-            {loadingResults ? (
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-slate-700">
-                Đang tải dữ liệu...
-              </div>
-            ) : examAgg.length === 0 ? (
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-slate-700">
-                Chưa có dữ liệu.
-              </div>
-            ) : (
-              <div className="h-80">
-                <ResponsiveContainer>
-                  <BarChart data={examAgg}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis
-                      dataKey="tenDe"
-                      interval={0}
-                      angle={-15}
-                      textAnchor="end"
-                      height={70}
-                    />
-                    <YAxis domain={[0, 100]} />
-                    <Tooltip />
-                    <Legend />
-                    <Bar dataKey="avgPercent" name="% đúng TB" fill="#3b82f6" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-          </div>
-
-          {/* Stacked bar correct by section */}
-          <div className="lg:col-span-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="mb-2">
-              <div className="text-lg font-bold text-slate-800">Số câu đúng theo phần (theo đề)</div>
-              <div className="text-sm text-slate-500">
-                GhepTu / Đọc / Nghe = số câu đúng (stack)
-              </div>
+            <div className="h-64">
+              <ResponsiveContainer>
+                <BarChart data={examAttemptsBarData} margin={{ left: 10, right: 10 }}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis
+                    dataKey="tenDe"
+                    interval={0}
+                    angle={-15}
+                    textAnchor="end"
+                    height={70}
+                  />
+                  <YAxis allowDecimals={false} />
+                  <Tooltip />
+                  <Bar dataKey="count" radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
             </div>
-
-            {loadingResults ? (
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-slate-700">
-                Đang tải dữ liệu...
-              </div>
-            ) : examAgg.length === 0 ? (
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-slate-700">
-                Chưa có dữ liệu.
-              </div>
-            ) : (
-              <div className="h-80">
-                <ResponsiveContainer>
-                  <BarChart data={examAgg}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis
-                      dataKey="tenDe"
-                      interval={0}
-                      angle={-15}
-                      textAnchor="end"
-                      height={70}
-                    />
-                    <YAxis />
-                    <Tooltip />
-                    <Legend />
-                    <Bar dataKey="ghepTuCorrect" name="GhepTu (đúng)" stackId="a" fill="#f59e0b" />
-                    <Bar dataKey="docCorrect" name="Đọc (đúng)" stackId="a" fill="#3b82f6" />
-                    <Bar dataKey="ngheCorrect" name="Nghe (đúng)" stackId="a" fill="#22c55e" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            )}
           </div>
         </div>
 
-        {/* ===== TABLE + PDF ===== */}
+        {/* ===== RESULTS TABLE + PDF ===== */}
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div className="mb-4 flex items-center justify-between">
             <div>
               <div className="text-lg font-bold text-slate-800">Bảng kết quả bài thi</div>
               <div className="text-sm text-slate-500">
-                Admin xem tất cả · GhepTu/Đọc/Nghe = số câu đúng · có Đúng/Tổng
+                STT | Name | Tên đề | Ghép từ | Trắc nghiệm | Sắp xếp từ | Nghe | Đọc | Đúng/Tổng | Tổng
               </div>
             </div>
 
             <button
-              type="button"
               onClick={exportPdf}
-              disabled={loadingResults || rows.length === 0}
-              className={cn(
-                "h-10 rounded-xl px-4 font-semibold text-white",
-                loadingResults || rows.length === 0
-                  ? "bg-slate-400 cursor-not-allowed"
-                  : "bg-violet-600 hover:bg-violet-700"
-              )}
+              className="px-4 py-2 rounded-xl bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800"
+              disabled={loading || rows.length === 0}
+              title={rows.length === 0 ? "Chưa có dữ liệu để xuất" : "Xuất PDF"}
             >
               Xuất PDF
             </button>
           </div>
 
-          {errResults && (
-            <div className="mb-3 rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 whitespace-pre-wrap">
-              {errResults}
-            </div>
-          )}
+          <div className="overflow-x-auto rounded-xl border border-slate-200">
+            <table className="min-w-full text-sm">
+              <thead className="bg-slate-100 text-slate-700 font-semibold">
+                <tr>
+                  <th className="px-4 py-3 text-left">STT</th>
+                  <th className="px-4 py-3 text-left">Name</th>
+                  <th className="px-4 py-3 text-left">Tên đề</th>
 
-          {loadingResults ? (
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-slate-700">
-              Đang tải dữ liệu...
-            </div>
-          ) : rows.length === 0 ? (
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-slate-700">
-              Chưa có dữ liệu kết quả.
-            </div>
-          ) : (
-            <div className="overflow-x-auto rounded-xl border border-slate-200">
-              <table className="min-w-full text-sm">
-                <thead className="bg-slate-100 text-slate-700 font-semibold">
-                  <tr>
-                    <th className="px-4 py-3 text-left">STT</th>
-                    <th className="px-4 py-3 text-left">Name</th>
-                    <th className="px-4 py-3 text-left">Tên đề</th>
-                    <th className="px-4 py-3 text-right">GhepTu</th>
-                    <th className="px-4 py-3 text-right">Đọc</th>
-                    <th className="px-4 py-3 text-right">Nghe</th>
-                    <th className="px-4 py-3 text-right">Đúng/Tổng</th>
-                    <th className="px-4 py-3 text-right">Tổng</th>
+                  <th className="px-4 py-3 text-right">Ghép từ</th>
+                  <th className="px-4 py-3 text-right">Trắc nghiệm</th>
+                  <th className="px-4 py-3 text-right">Sắp xếp từ</th>
+                  <th className="px-4 py-3 text-right">Nghe</th>
+                  <th className="px-4 py-3 text-right">Đọc</th>
+
+                  <th className="px-4 py-3 text-right">Đúng/Tổng</th>
+                  <th className="px-4 py-3 text-right">Tổng</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {rows.map((r) => (
+                  <tr
+                    key={`${r.stt}-${r.name}-${r.tenDe}`}
+                    className="odd:bg-white even:bg-slate-50 border-t border-slate-200"
+                  >
+                    <td className="px-4 py-3">{r.stt}</td>
+                    <td className="px-4 py-3 font-medium text-slate-800">{r.name}</td>
+                    <td className="px-4 py-3 text-slate-800">{r.tenDe}</td>
+
+                    <td className="px-4 py-3 text-right">{r.ghepTu}</td>
+                    <td className="px-4 py-3 text-right">{r.tracNghiem}</td>
+                    <td className="px-4 py-3 text-right">{r.sapXepTu}</td>
+                    <td className="px-4 py-3 text-right">{r.nghe}</td>
+                    <td className="px-4 py-3 text-right">{r.doc}</td>
+
+                    <td className="px-4 py-3 text-right">
+                      {r.dungTong} ({pct(r.totalCorrect, r.totalQ)}%)
+                    </td>
+                    <td className="px-4 py-3 text-right font-bold text-slate-900">
+                      {r.tong}
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {rows.map((r) => (
-                    <tr
-                      key={`${r.stt}-${r.name}-${r.tenDe}`}
-                      className="odd:bg-white even:bg-slate-50 border-t border-slate-200"
-                    >
-                      <td className="px-4 py-3">{r.stt}</td>
-                      <td className="px-4 py-3">
-                        <div className="font-semibold text-slate-900 truncate max-w-[240px]">
-                          {r.name}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="font-semibold text-slate-900 truncate max-w-[420px]">
-                          {r.tenDe}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-right font-semibold">{r.ghepTu}</td>
-                      <td className="px-4 py-3 text-right font-semibold">{r.doc}</td>
-                      <td className="px-4 py-3 text-right font-semibold">{r.nghe}</td>
-                      <td className="px-4 py-3 text-right font-semibold text-slate-900">
-                        {r.dung}/{r.tongCau} ({r.percent}%)
-                      </td>
-                      <td className="px-4 py-3 text-right font-extrabold text-violet-700">
-                        {r.tong}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                ))}
+
+                {!loading && rows.length === 0 && (
+                  <tr className="border-t border-slate-200">
+                    <td colSpan={10} className="px-4 py-6 text-slate-500">
+                      Chưa có dữ liệu kết quả bài thi.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
 
           <div className="mt-3 text-xs text-slate-500">
-            * Mapping: GhepTu=khoptu, Đọc=tracnghiem+sapxeptu, Nghe=nghe. Tổng=DiemSo backend.
+            *Các cột kỹ năng là dạng <span className="font-mono">đúng/tổng</span> theo loại câu hỏi.
           </div>
         </div>
       </div>
     </ContentLayoutWrapper>
   );
 }
+
 
 // import React, { useEffect, useMemo, useState } from "react";
 // import { ContentLayoutWrapper } from "~/layouts/admin-layout/items/content-layout-wrapper";

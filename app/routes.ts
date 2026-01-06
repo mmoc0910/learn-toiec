@@ -15,6 +15,7 @@ export default [
     route("exams/result/:ketQuaID", "routes/user/exam-404.tsx"),
     route("classes/:id", "routes/user/class-detail.tsx"),
     route("lessons/:id", "routes/user/lesson-detail.tsx"),
+    route("update-profile", "routes/user/update-profile.tsx"),
     route("login", "routes/login.tsx"),
     route("register", "routes/register.tsx"),
   ]),
