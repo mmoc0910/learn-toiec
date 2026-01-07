@@ -188,6 +188,7 @@ export function CreateTeacherModal({
   }, [isSubmitting, onClose]);
 
   const onSubmit = async (vals: FormValues) => {
+    console.log("Submit create teacher:", vals);
     if (vals.TrangThaiLamViec === "") {
       alert("Vui lòng chọn Trạng thái làm việc");
       return;
@@ -284,7 +285,6 @@ export function CreateTeacherModal({
                 name="GiaoVienID"
                 label="GiaoVienID (tự sinh)"
                 rules={{ required: "Bắt buộc" }}
-                disabled
                 inputClassName="bg-slate-100 cursor-not-allowed"
               />
 
@@ -293,7 +293,6 @@ export function CreateTeacherModal({
                 name="TaiKhoan"
                 label="Id tài khoản (tự sinh)"
                 rules={{ required: "Bắt buộc" }}
-                disabled
                 inputClassName="bg-slate-100 cursor-not-allowed"
               />
 

@@ -96,6 +96,7 @@ type ClassItem = {
   completion: number; // backend chưa có
   pending: number; // backend chưa có
   color: `#${string}`;
+  description: string
 };
 
 type ClassListPanelProps = {
@@ -244,10 +245,13 @@ const ClassListPanel: React.FC<ClassListPanelProps> = ({
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="text-base font-bold text-slate-800 truncate">
-                      {cls.name}
-                    </div>
-                    <div className="text-[13px] text-slate-500 truncate">
+                      {cls.name} - <span className="text-[13px] text-slate-500 truncate">
                       {cls.id}
+                    </span>
+                    </div>
+                    
+                    <div className="text-[13px] text-slate-500 truncate">
+                      {cls.description}
                     </div>
                   </div>
 
@@ -264,9 +268,9 @@ const ClassListPanel: React.FC<ClassListPanelProps> = ({
 
                 <div className="flex flex-wrap gap-2">
                   <StatPill>👥 {cls.studentCount} HV</StatPill>
-                  <StatPill>📈 {cls.avgScore} TB</StatPill>
+                  {/* <StatPill>📈 {cls.avgScore} TB</StatPill>
                   <StatPill>✅ {cls.completion}% HT</StatPill>
-                  <StatPill>⏳ {cls.pending} bài đợi</StatPill>
+                  <StatPill>⏳ {cls.pending} bài đợi</StatPill> */}
                 </div>
 
                 <div className="flex gap-2">
@@ -414,6 +418,7 @@ export default function Class(): JSX.Element {
       completion: 0,
       pending: 0,
       color: colorFromId(c.IDLopHoc),
+      description: c.MoTa,
     }));
   }, [rawClasses]);
 
