@@ -5,6 +5,11 @@ import { ContentLayoutWrapper } from "~/layouts/admin-layout/items/content-layou
 import { http } from "utils/libs/https";
 import { formatDateTime } from "utils/helpers/helpers";
 
+// ✅ PDF Export
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+import { ensureVietnameseFont } from "utils/pdfFont";
+
 // ===== Types =====
 type QuyenDetail = { IDQuyen: number; TenQuyen: string };
 
@@ -69,7 +74,9 @@ function getApiErrorMessage(err: any) {
   );
 }
 
-function getAccountStatus(tk?: TaiKhoanDetail | null): { disabled: boolean; label: string } {
+function getAccountStatus(
+  tk?: TaiKhoanDetail | null
+): { disabled: boolean; label: string } {
   if (!tk) return { disabled: false, label: "—" };
   const isActive = tk.is_active ?? true;
   const biVoHieu = tk.BiVoHieuHoa ?? false;
@@ -81,9 +88,17 @@ function StatusBadge({ disabled }: { disabled: boolean }) {
   const base =
     "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold border";
   if (disabled) {
-    return <span className={`${base} bg-red-50 text-red-700 border-red-200`}>Disabled</span>;
+    return (
+      <span className={`${base} bg-red-50 text-red-700 border-red-200`}>
+        Disabled
+      </span>
+    );
   }
-  return <span className={`${base} bg-emerald-50 text-emerald-700 border-emerald-200`}>Active</span>;
+  return (
+    <span className={`${base} bg-emerald-50 text-emerald-700 border-emerald-200`}>
+      Active
+    </span>
+  );
 }
 
 export default function StudentsTablePage(): JSX.Element {
@@ -133,9 +148,11 @@ export default function StudentsTablePage(): JSX.Element {
       const text =
         `${s.HocVienID} ${s.TaiKhoan} ${tk?.Email ?? ""} ${tk?.HoTen ?? ""} ${
           tk?.SoDienThoai ?? ""
-        } ${role} ${tk?.NgayTaoTaiKhoan ?? ""} ${statusText} ${s.TruongHoc ?? ""} ${
-          s.TrinhDoHienTai ?? ""
-        } ${s.MucTieu ?? ""} ${s.GhiChuCaNhan ?? ""}`.toLowerCase();
+        } ${role} ${tk?.NgayTaoTaiKhoan ?? ""} ${statusText} ${
+          s.TruongHoc ?? ""
+        } ${s.TrinhDoHienTai ?? ""} ${s.MucTieu ?? ""} ${
+          s.GhiChuCaNhan ?? ""
+        }`.toLowerCase();
 
       return text.includes(kw);
     });
@@ -229,7 +246,8 @@ export default function StudentsTablePage(): JSX.Element {
 
       const jobs = selectedStudents.map((s) => {
         const userId = getUserIdFromStudent(s);
-        if (!userId) return Promise.reject(new Error(`Thiếu IDTaiKhoan: ${s.HocVienID}`));
+        if (!userId)
+          return Promise.reject(new Error(`Thiếu IDTaiKhoan: ${s.HocVienID}`));
         return toggleUserStatus(userId, action);
       });
 
@@ -287,6 +305,141 @@ export default function StudentsTablePage(): JSX.Element {
     }
   }
 
+  // ✅ Export PDF danh sách học viên (đang hiển thị theo search + filter role)
+  async function exportStudentsPdf() {
+    try {
+      const list = data; // ✅ data đã là học viên + đã search client-side
+      if (!list.length) {
+        alert("Không có học viên để export.");
+        return;
+      }
+
+      const doc = new jsPDF({
+        orientation: "landscape",
+        unit: "pt",
+        format: "a4",
+      });
+
+      await ensureVietnameseFont(doc);
+
+      const now = new Date();
+      const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(
+        2,
+        "0"
+      )}-${String(now.getDate()).padStart(2, "0")}_${String(
+        now.getHours()
+      ).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}`;
+
+      const MARGIN_X = 36;
+      const MARGIN_TOP = 36;
+
+      doc.setFont("RobotoCondensed", "bold");
+      doc.setFontSize(16);
+      doc.text("DANH SÁCH HỌC VIÊN", MARGIN_X, MARGIN_TOP);
+
+      doc.setFont("RobotoCondensed", "normal");
+      doc.setFontSize(10);
+      doc.text(
+        `Tổng: ${list.length} | Xuất lúc: ${formatDateTime(now.toISOString())}`,
+        MARGIN_X,
+        MARGIN_TOP + 18
+      );
+
+      autoTable(doc, {
+        startY: MARGIN_TOP + 30,
+
+        // ✅ chống tràn ngang
+        tableWidth: "wrap",
+        margin: { left: MARGIN_X, right: MARGIN_X },
+
+        styles: {
+          font: "RobotoCondensed",
+          fontStyle: "normal",
+          fontSize: 8,
+          cellPadding: 4,
+          overflow: "linebreak",
+          cellWidth: "wrap",
+          valign: "middle",
+        },
+
+        headStyles: {
+          font: "RobotoCondensed",
+          fontStyle: "bold",
+          fontSize: 8,
+        },
+
+        columnStyles: {
+          0: { halign: "right", cellWidth: "auto" }, // STT
+          1: { cellWidth: "auto" }, // HocVienID
+          2: { cellWidth: "wrap" }, // Email
+          3: { cellWidth: "auto" }, // Họ tên
+          4: { halign: "right", cellWidth: "auto" }, // SĐT
+          5: { halign: "center", cellWidth: "auto" }, // Trạng thái
+          6: { cellWidth: "auto" }, // Ngày tạo
+          7: { cellWidth: "wrap" }, // Trường học
+          8: { cellWidth: "wrap" }, // Trình độ hiện tại
+          9: { cellWidth: "wrap" }, // Mục tiêu
+          10: { cellWidth: "wrap" }, // Ghi chú
+        },
+
+        head: [
+          [
+            "STT",
+            "HocVienID",
+            "Email",
+            "Họ tên",
+            "SĐT",
+            "Trạng thái",
+            "Ngày tạo",
+            "Trường học",
+            "Trình độ",
+            "Mục tiêu",
+            "Ghi chú",
+          ],
+        ],
+
+        body: list.map((s, idx) => {
+          const tk = s.TaiKhoan_detail;
+          const status = getAccountStatus(tk);
+
+          return [
+            idx + 1,
+            safeStr(s.HocVienID) || "—",
+            safeStr(tk?.Email ?? s.TaiKhoan) || "—",
+            safeStr(tk?.HoTen) || "—",
+            safeStr(tk?.SoDienThoai) || "—",
+            status.label,
+            formatDateTime(tk?.NgayTaoTaiKhoan),
+            safeStr(s.TruongHoc) || "—",
+            safeStr(s.TrinhDoHienTai) || "—",
+            safeStr(s.MucTieu) || "—",
+            safeStr(s.GhiChuCaNhan) || "—",
+          ];
+        }),
+
+        showHead: "everyPage",
+
+        didDrawPage: () => {
+          const pageCount = doc.getNumberOfPages();
+          const pageCurrent = doc.getCurrentPageInfo().pageNumber;
+
+          doc.setFont("RobotoCondensed", "normal");
+          doc.setFontSize(9);
+          doc.text(
+            `Trang ${pageCurrent}/${pageCount}`,
+            doc.internal.pageSize.getWidth() - MARGIN_X,
+            doc.internal.pageSize.getHeight() - 18,
+            { align: "right" }
+          );
+        },
+      });
+
+      doc.save(`students_${stamp}.pdf`);
+    } catch (e: any) {
+      alert(e?.message || "Export PDF thất bại");
+    }
+  }
+
   const columns: Column<StudentItem>[] = useMemo(
     () => [
       {
@@ -302,7 +455,9 @@ export default function StudentsTablePage(): JSX.Element {
         sortable: true,
         sortValue: (r) => r?.TaiKhoan_detail?.Email ?? r.TaiKhoan ?? "",
         render: (r) => (
-          <div className="max-w-65 truncate">{safeStr(r?.TaiKhoan_detail?.Email ?? r.TaiKhoan)}</div>
+          <div className="max-w-65 truncate">
+            {safeStr(r?.TaiKhoan_detail?.Email ?? r.TaiKhoan)}
+          </div>
         ),
       },
       {
@@ -325,7 +480,9 @@ export default function StudentsTablePage(): JSX.Element {
         header: "Trạng thái",
         sortable: true,
         sortValue: (r) => (getAccountStatus(r.TaiKhoan_detail).disabled ? 0 : 1),
-        render: (r) => <StatusBadge disabled={getAccountStatus(r.TaiKhoan_detail).disabled} />,
+        render: (r) => (
+          <StatusBadge disabled={getAccountStatus(r.TaiKhoan_detail).disabled} />
+        ),
       },
       {
         key: "ngaytao",
@@ -333,7 +490,9 @@ export default function StudentsTablePage(): JSX.Element {
         sortable: true,
         sortValue: (r) => r?.TaiKhoan_detail?.NgayTaoTaiKhoan ?? "",
         render: (r) => (
-          <span className="whitespace-nowrap">{formatDateTime(r?.TaiKhoan_detail?.NgayTaoTaiKhoan)}</span>
+          <span className="whitespace-nowrap">
+            {formatDateTime(r?.TaiKhoan_detail?.NgayTaoTaiKhoan)}
+          </span>
         ),
       },
       {
@@ -381,15 +540,21 @@ export default function StudentsTablePage(): JSX.Element {
     <FormProvider {...forms}>
       <ContentLayoutWrapper heading="Quản lý học viên">
         {errMsg ? (
-          <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">{errMsg}</div>
+          <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">
+            {errMsg}
+          </div>
         ) : null}
 
         {/* Toolbar */}
         <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_4px_0_0_rgba(143,156,173,0.2)]">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
-              <h2 className="m-0 text-xl font-bold text-slate-800">Danh sách học viên</h2>
-              <p className="mt-1 text-slate-500">Chọn học viên bằng checkbox để kích hoạt / vô hiệu nhiều.</p>
+              <h2 className="m-0 text-xl font-bold text-slate-800">
+                Danh sách học viên
+              </h2>
+              <p className="mt-1 text-slate-500">
+                Chọn học viên bằng checkbox để kích hoạt / vô hiệu nhiều.
+              </p>
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
@@ -407,6 +572,17 @@ export default function StudentsTablePage(): JSX.Element {
                 disabled={loading || bulkActing || actingIds.size > 0}
               >
                 {loading ? "Đang tải..." : "Reload"}
+              </button>
+
+              {/* ✅ Export PDF */}
+              <button
+                type="button"
+                onClick={exportStudentsPdf}
+                className="h-10 rounded-xl border border-slate-200 bg-white px-4 font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 active:scale-[0.99] disabled:opacity-60"
+                disabled={loading || bulkActing || actingIds.size > 0}
+                title="Export danh sách học viên (đang hiển thị) ra PDF"
+              >
+                Export PDF
               </button>
 
               <button
@@ -427,7 +603,9 @@ export default function StudentsTablePage(): JSX.Element {
                 {bulkActing ? "Đang xử lý..." : `Vô hiệu (${selectedIds.length})`}
               </button>
 
-              <div className="text-right font-semibold text-slate-700">{data.length} học viên</div>
+              <div className="text-right font-semibold text-slate-700">
+                {data.length} học viên
+              </div>
             </div>
           </div>
         </div>
@@ -448,6 +626,458 @@ export default function StudentsTablePage(): JSX.Element {
     </FormProvider>
   );
 }
+
+
+// import React, { useEffect, useMemo, useState, type JSX } from "react";
+// import { FormProvider, useForm } from "react-hook-form";
+// import { Input, Table, type Column } from "elements";
+// import { ContentLayoutWrapper } from "~/layouts/admin-layout/items/content-layout-wrapper";
+// import { http } from "utils/libs/https";
+// import { formatDateTime } from "utils/helpers/helpers";
+
+// // ===== Types =====
+// type QuyenDetail = { IDQuyen: number; TenQuyen: string };
+
+// type TaiKhoanDetail = {
+//   IDTaiKhoan: string;
+//   Email: string;
+//   HoTen: string;
+//   AnhDaiDien: string | null;
+//   SoDienThoai: number | null;
+//   NgayTaoTaiKhoan: string;
+//   TrangThaiTaiKhoan: string | null;
+//   IDQuyen: number;
+//   IDQuyen_detail?: QuyenDetail | null;
+
+//   BiVoHieuHoa?: boolean;
+//   is_active?: boolean;
+// };
+
+// type StudentItem = {
+//   HocVienID: string;
+//   TaiKhoan: string;
+//   TaiKhoan_detail?: TaiKhoanDetail | null;
+
+//   NgaySinh: string | null;
+//   MucTieu: string | null;
+//   TruongHoc: string | null;
+//   TrinhDoHienTai: string | null;
+//   GhiChuCaNhan: string | null;
+// };
+
+// type StudentListResponse = {
+//   count: number;
+//   next: string | null;
+//   previous: string | null;
+//   results: StudentItem[];
+// };
+
+// type FormValues = { search: string };
+
+// // ===== API =====
+// type ToggleAction = "activate" | "deactivate";
+
+// async function toggleUserStatus(userId: string, action?: ToggleAction) {
+//   // ✅ FIX 404: encode email / special chars
+//   const safeId = encodeURIComponent(userId);
+//   const body = action ? { action } : undefined;
+//   return http.post(`/api/auth/users/${safeId}/toggle_status/`, body);
+// }
+
+// // ===== Helpers =====
+// function safeStr(v: unknown) {
+//   if (v == null) return "";
+//   return String(v);
+// }
+
+// function getApiErrorMessage(err: any) {
+//   return (
+//     err?.response?.data?.detail ||
+//     err?.response?.data?.message ||
+//     err?.message ||
+//     "Có lỗi xảy ra."
+//   );
+// }
+
+// function getAccountStatus(tk?: TaiKhoanDetail | null): { disabled: boolean; label: string } {
+//   if (!tk) return { disabled: false, label: "—" };
+//   const isActive = tk.is_active ?? true;
+//   const biVoHieu = tk.BiVoHieuHoa ?? false;
+//   const disabled = !isActive || biVoHieu;
+//   return { disabled, label: disabled ? "Disabled" : "Active" };
+// }
+
+// function StatusBadge({ disabled }: { disabled: boolean }) {
+//   const base =
+//     "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold border";
+//   if (disabled) {
+//     return <span className={`${base} bg-red-50 text-red-700 border-red-200`}>Disabled</span>;
+//   }
+//   return <span className={`${base} bg-emerald-50 text-emerald-700 border-emerald-200`}>Active</span>;
+// }
+
+// export default function StudentsTablePage(): JSX.Element {
+//   const forms = useForm<FormValues>({ defaultValues: { search: "" } });
+
+//   const [students, setStudents] = useState<StudentItem[]>([]);
+//   const [loading, setLoading] = useState(false);
+//   const [errMsg, setErrMsg] = useState<string | null>(null);
+
+//   // selection
+//   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
+//   // acting states
+//   const [actingIds, setActingIds] = useState<Set<string>>(new Set());
+//   const [bulkActing, setBulkActing] = useState(false);
+
+//   const search = forms.watch("search") ?? "";
+
+//   async function fetchAll() {
+//     setLoading(true);
+//     setErrMsg(null);
+//     try {
+//       const res = await http.get<StudentListResponse>("/api/auth/students/");
+//       setStudents(res.data?.results ?? []);
+//       setSelectedIds([]);
+//     } catch (e: any) {
+//       setErrMsg(getApiErrorMessage(e));
+//     } finally {
+//       setLoading(false);
+//     }
+//   }
+
+//   useEffect(() => {
+//     fetchAll();
+//   }, []);
+
+//   const filtered = useMemo(() => {
+//     const list = students || [];
+//     const kw = search.trim().toLowerCase();
+//     if (!kw) return list;
+
+//     return list.filter((s) => {
+//       const tk = s.TaiKhoan_detail;
+//       const role = tk?.IDQuyen_detail?.TenQuyen ?? "";
+//       const statusText = `${tk?.is_active ?? ""} ${tk?.BiVoHieuHoa ?? ""}`;
+
+//       const text =
+//         `${s.HocVienID} ${s.TaiKhoan} ${tk?.Email ?? ""} ${tk?.HoTen ?? ""} ${
+//           tk?.SoDienThoai ?? ""
+//         } ${role} ${tk?.NgayTaoTaiKhoan ?? ""} ${statusText} ${s.TruongHoc ?? ""} ${
+//           s.TrinhDoHienTai ?? ""
+//         } ${s.MucTieu ?? ""} ${s.GhiChuCaNhan ?? ""}`.toLowerCase();
+
+//       return text.includes(kw);
+//     });
+//   }, [students, search]);
+
+//   // ✅ chỉ học viên
+//   const data = useMemo(
+//     () => filtered.filter((s) => s.TaiKhoan_detail?.IDQuyen_detail?.IDQuyen === 2),
+//     [filtered]
+//   );
+
+//   const isActing = (hocVienId: string) => actingIds.has(hocVienId);
+
+//   const setActing = (hocVienId: string, value: boolean) => {
+//     setActingIds((prev) => {
+//       const next = new Set(prev);
+//       if (value) next.add(hocVienId);
+//       else next.delete(hocVienId);
+//       return next;
+//     });
+//   };
+
+//   function getUserIdFromStudent(s: StudentItem) {
+//     return s?.TaiKhoan_detail?.IDTaiKhoan || s.TaiKhoan || "";
+//   }
+
+//   async function handleToggleOne(student: StudentItem) {
+//     const userId = getUserIdFromStudent(student);
+//     if (!userId) {
+//       alert("Không tìm thấy IDTaiKhoan.");
+//       return;
+//     }
+//     if (bulkActing || isActing(student.HocVienID)) return;
+
+//     const { disabled } = getAccountStatus(student.TaiKhoan_detail);
+//     const action: ToggleAction = disabled ? "activate" : "deactivate";
+
+//     const ok = window.confirm(
+//       disabled
+//         ? `Sếp muốn KÍCH HOẠT tài khoản: ${userId} ?`
+//         : `Sếp muốn VÔ HIỆU tài khoản: ${userId} ?`
+//     );
+//     if (!ok) return;
+
+//     setActing(student.HocVienID, true);
+//     try {
+//       await toggleUserStatus(userId, action);
+
+//       // optimistic update
+//       setStudents((prev) =>
+//         prev.map((s) => {
+//           if (s.HocVienID !== student.HocVienID) return s;
+//           const tk = s.TaiKhoan_detail;
+//           if (!tk) return s;
+
+//           return {
+//             ...s,
+//             TaiKhoan_detail: {
+//               ...tk,
+//               is_active: action === "activate",
+//               BiVoHieuHoa: action === "deactivate",
+//             },
+//           };
+//         })
+//       );
+//     } catch (e: any) {
+//       alert(getApiErrorMessage(e));
+//     } finally {
+//       setActing(student.HocVienID, false);
+//     }
+//   }
+
+//   async function handleBulk(action: ToggleAction) {
+//     if (bulkActing) return;
+//     if (selectedIds.length === 0) return;
+
+//     const ok = window.confirm(
+//       action === "activate"
+//         ? `Sếp có chắc muốn KÍCH HOẠT ${selectedIds.length} tài khoản đã chọn không?`
+//         : `Sếp có chắc muốn VÔ HIỆU ${selectedIds.length} tài khoản đã chọn không?`
+//     );
+//     if (!ok) return;
+
+//     setBulkActing(true);
+//     selectedIds.forEach((id) => setActing(id, true));
+
+//     try {
+//       const selectedStudents = selectedIds
+//         .map((hocVienId) => data.find((x) => x.HocVienID === hocVienId))
+//         .filter(Boolean) as StudentItem[];
+
+//       const jobs = selectedStudents.map((s) => {
+//         const userId = getUserIdFromStudent(s);
+//         if (!userId) return Promise.reject(new Error(`Thiếu IDTaiKhoan: ${s.HocVienID}`));
+//         return toggleUserStatus(userId, action);
+//       });
+
+//       const results = await Promise.allSettled(jobs);
+
+//       const successHocVienIds: string[] = [];
+//       const failed: { hocVienId: string; reason: any }[] = [];
+
+//       results.forEach((r, idx) => {
+//         const hvId = selectedStudents[idx].HocVienID;
+//         if (r.status === "fulfilled") successHocVienIds.push(hvId);
+//         else failed.push({ hocVienId: hvId, reason: r.reason });
+//       });
+
+//       if (successHocVienIds.length) {
+//         setStudents((prev) =>
+//           prev.map((s) => {
+//             if (!successHocVienIds.includes(s.HocVienID)) return s;
+//             const tk = s.TaiKhoan_detail;
+//             if (!tk) return s;
+
+//             return {
+//               ...s,
+//               TaiKhoan_detail: {
+//                 ...tk,
+//                 is_active: action === "activate",
+//                 BiVoHieuHoa: action === "deactivate",
+//               },
+//             };
+//           })
+//         );
+//       }
+
+//       if (failed.length) {
+//         const msg =
+//           `Thao tác thất bại ${failed.length} học viên:\n` +
+//           failed
+//             .slice(0, 10)
+//             .map(
+//               (x) =>
+//                 `- ${x.hocVienId}: ${
+//                   x.reason?.response?.data?.detail ||
+//                   x.reason?.response?.data?.message ||
+//                   x.reason?.message ||
+//                   "Lỗi"
+//                 }`
+//             )
+//             .join("\n") +
+//           (failed.length > 10 ? `\n... và ${failed.length - 10} lỗi khác` : "");
+//         alert(msg);
+//       }
+//     } finally {
+//       selectedIds.forEach((id) => setActing(id, false));
+//       setBulkActing(false);
+//     }
+//   }
+
+//   const columns: Column<StudentItem>[] = useMemo(
+//     () => [
+//       {
+//         key: "hocvienid",
+//         header: "HocVienID",
+//         sortable: true,
+//         sortValue: (r) => r.HocVienID,
+//         render: (r) => <span className="font-semibold">{r.HocVienID}</span>,
+//       },
+//       {
+//         key: "email",
+//         header: "Email",
+//         sortable: true,
+//         sortValue: (r) => r?.TaiKhoan_detail?.Email ?? r.TaiKhoan ?? "",
+//         render: (r) => (
+//           <div className="max-w-65 truncate">{safeStr(r?.TaiKhoan_detail?.Email ?? r.TaiKhoan)}</div>
+//         ),
+//       },
+//       {
+//         key: "hoten",
+//         header: "Họ tên",
+//         sortable: true,
+//         sortValue: (r) => r?.TaiKhoan_detail?.HoTen ?? "",
+//         render: (r) => safeStr(r?.TaiKhoan_detail?.HoTen) || "—",
+//       },
+//       {
+//         key: "sdt",
+//         header: "SĐT",
+//         align: "right",
+//         sortable: true,
+//         sortValue: (r) => r?.TaiKhoan_detail?.SoDienThoai ?? -1,
+//         render: (r) => safeStr(r?.TaiKhoan_detail?.SoDienThoai) || "—",
+//       },
+//       {
+//         key: "status",
+//         header: "Trạng thái",
+//         sortable: true,
+//         sortValue: (r) => (getAccountStatus(r.TaiKhoan_detail).disabled ? 0 : 1),
+//         render: (r) => <StatusBadge disabled={getAccountStatus(r.TaiKhoan_detail).disabled} />,
+//       },
+//       {
+//         key: "ngaytao",
+//         header: "Ngày tạo",
+//         sortable: true,
+//         sortValue: (r) => r?.TaiKhoan_detail?.NgayTaoTaiKhoan ?? "",
+//         render: (r) => (
+//           <span className="whitespace-nowrap">{formatDateTime(r?.TaiKhoan_detail?.NgayTaoTaiKhoan)}</span>
+//         ),
+//       },
+//       {
+//         key: "actions",
+//         header: "Thao tác",
+//         align: "right",
+//         render: (r) => {
+//           const disabledRow = bulkActing || isActing(r.HocVienID) || loading;
+//           const { disabled } = getAccountStatus(r.TaiKhoan_detail);
+//           const nextAction: ToggleAction = disabled ? "activate" : "deactivate";
+
+//           return (
+//             <div className="flex justify-end gap-2">
+//               <button
+//                 type="button"
+//                 className={[
+//                   "h-9 rounded-lg px-3 text-sm font-semibold border disabled:opacity-60",
+//                   nextAction === "activate"
+//                     ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+//                     : "border-red-200 bg-red-50 text-red-700 hover:bg-red-100",
+//                 ].join(" ")}
+//                 onClick={(e) => {
+//                   e.stopPropagation();
+//                   handleToggleOne(r);
+//                 }}
+//                 disabled={disabledRow}
+//               >
+//                 {isActing(r.HocVienID)
+//                   ? "Đang xử lý..."
+//                   : nextAction === "activate"
+//                   ? "Kích hoạt"
+//                   : "Vô hiệu"}
+//               </button>
+//             </div>
+//           );
+//         },
+//       },
+//     ],
+//     [bulkActing, actingIds, loading]
+//   );
+
+//   const anySelected = selectedIds.length > 0;
+
+//   return (
+//     <FormProvider {...forms}>
+//       <ContentLayoutWrapper heading="Quản lý học viên">
+//         {errMsg ? (
+//           <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">{errMsg}</div>
+//         ) : null}
+
+//         {/* Toolbar */}
+//         <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_4px_0_0_rgba(143,156,173,0.2)]">
+//           <div className="flex flex-wrap items-center justify-between gap-4">
+//             <div>
+//               <h2 className="m-0 text-xl font-bold text-slate-800">Danh sách học viên</h2>
+//               <p className="mt-1 text-slate-500">Chọn học viên bằng checkbox để kích hoạt / vô hiệu nhiều.</p>
+//             </div>
+
+//             <div className="flex flex-wrap items-center gap-3">
+//               <Input
+//                 name="search"
+//                 type="search"
+//                 placeholder="Tìm theo ID / email / họ tên / SĐT..."
+//                 inputClassName="focus:ring-4 focus:ring-violet-100 min-w-[200px] w-[500px]"
+//               />
+
+//               <button
+//                 type="button"
+//                 onClick={fetchAll}
+//                 className="h-10 rounded-xl border border-slate-200 bg-white px-4 font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 active:scale-[0.99] disabled:opacity-60"
+//                 disabled={loading || bulkActing || actingIds.size > 0}
+//               >
+//                 {loading ? "Đang tải..." : "Reload"}
+//               </button>
+
+//               <button
+//                 type="button"
+//                 onClick={() => handleBulk("activate")}
+//                 className="h-10 rounded-xl border border-emerald-200 bg-emerald-50 px-4 font-semibold text-emerald-700 shadow-sm transition hover:bg-emerald-100 active:scale-[0.99] disabled:opacity-60"
+//                 disabled={!anySelected || bulkActing || loading}
+//               >
+//                 {bulkActing ? "Đang xử lý..." : `Kích hoạt (${selectedIds.length})`}
+//               </button>
+
+//               <button
+//                 type="button"
+//                 onClick={() => handleBulk("deactivate")}
+//                 className="h-10 rounded-xl border border-red-200 bg-red-50 px-4 font-semibold text-red-700 shadow-sm transition hover:bg-red-100 active:scale-[0.99] disabled:opacity-60"
+//                 disabled={!anySelected || bulkActing || loading}
+//               >
+//                 {bulkActing ? "Đang xử lý..." : `Vô hiệu (${selectedIds.length})`}
+//               </button>
+
+//               <div className="text-right font-semibold text-slate-700">{data.length} học viên</div>
+//             </div>
+//           </div>
+//         </div>
+
+//         <Table<StudentItem>
+//           columns={columns}
+//           data={data}
+//           getRowId={(row) => row.HocVienID}
+//           loading={loading}
+//           emptyText="Không có học viên phù hợp."
+//           selectable
+//           selectedIds={selectedIds}
+//           onSelectedIdsChange={setSelectedIds}
+//           onRowClick={(row) => console.log("Row click:", row)}
+//           maxHeightClassName="max-h-[640px]"
+//         />
+//       </ContentLayoutWrapper>
+//     </FormProvider>
+//   );
+// }
 
 //---------------------------------------------------------------------------
 

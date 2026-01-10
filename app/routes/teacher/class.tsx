@@ -8,6 +8,11 @@ import { http } from "utils/libs/https";
 import { Modal } from "elements/modal/modal";
 import { useAuth } from "hooks/useAuth";
 
+// ✅ PDF Export
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+import { ensureVietnameseFont } from "utils/pdfFont";
+
 /** =======================
  * API Types (theo response backend)
  * ======================= */
@@ -55,9 +60,6 @@ type LopHocApi = {
   }>;
 
   so_hoc_vien: number;
-
-  // NOTE: bạn đang dùng filter theo item?.IDGiaoVien_detail... nên backend có thể có field này.
-  // Nếu TypeScript báo lỗi thì thêm optional vào:
   IDGiaoVien_detail?: any;
 };
 
@@ -90,13 +92,13 @@ type ClassId = string;
 type ClassItem = {
   id: ClassId; // = IDLopHoc
   name: string; // = TenLopHoc
-  semester: string; // backend chưa có
-  studentCount: number; // = so_hoc_vien
-  avgScore: string; // backend chưa có
-  completion: number; // backend chưa có
-  pending: number; // backend chưa có
+  semester: string;
+  studentCount: number;
+  avgScore: string;
+  completion: number;
+  pending: number;
   color: `#${string}`;
-  description: string
+  description: string;
 };
 
 type ClassListPanelProps = {
@@ -173,6 +175,23 @@ function getApiErrorMessage(err: any) {
   return "Có lỗi xảy ra.";
 }
 
+function safeStr(v: unknown) {
+  if (v == null) return "";
+  return String(v);
+}
+
+function formatDateTime(iso?: string | null) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
+}
+
 const StatPill: React.FC<React.PropsWithChildren> = ({ children }) => (
   <span className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-[13px] font-semibold text-slate-700">
     {children}
@@ -245,11 +264,12 @@ const ClassListPanel: React.FC<ClassListPanelProps> = ({
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="text-base font-bold text-slate-800 truncate">
-                      {cls.name} - <span className="text-[13px] text-slate-500 truncate">
-                      {cls.id}
-                    </span>
+                      {cls.name} -{" "}
+                      <span className="text-[13px] text-slate-500 truncate">
+                        {cls.id}
+                      </span>
                     </div>
-                    
+
                     <div className="text-[13px] text-slate-500 truncate">
                       {cls.description}
                     </div>
@@ -268,9 +288,6 @@ const ClassListPanel: React.FC<ClassListPanelProps> = ({
 
                 <div className="flex flex-wrap gap-2">
                   <StatPill>👥 {cls.studentCount} HV</StatPill>
-                  {/* <StatPill>📈 {cls.avgScore} TB</StatPill>
-                  <StatPill>✅ {cls.completion}% HT</StatPill>
-                  <StatPill>⏳ {cls.pending} bài đợi</StatPill> */}
                 </div>
 
                 <div className="flex gap-2">
@@ -331,15 +348,15 @@ type AddClassForm = {
 };
 
 type EditClassForm = {
-  IDLopHoc: string; // readonly (ID để patch)
+  IDLopHoc: string;
   TenLopHoc: string;
   MoTa: string;
   IDGiaoVien: string;
 };
 
 type AddStudentForm = {
-  IDHocVien: string; // = IDTaiKhoan (role=2)
-  search_user: string; // keyword search trong dropdown
+  IDHocVien: string;
+  search_user: string;
 };
 
 export default function Class(): JSX.Element {
@@ -455,6 +472,125 @@ export default function Class(): JSX.Element {
       return name.toLowerCase().includes(q) || email.toLowerCase().includes(q);
     });
   }, [selectedClassApi, keywordStudent]);
+
+  /** ✅ EXPORT PDF: danh sách học viên theo lớp đang chọn */
+  async function exportStudentsByClassPdf() {
+    try {
+      const cls = selectedClassUI;
+      const clsApi = selectedClassApi;
+
+      if (!cls || !clsApi?.IDLopHoc) {
+        alert("Chưa chọn lớp để export.");
+        return;
+      }
+
+      const list = filteredStudents; // ✅ đúng theo search_student
+      if (!list.length) {
+        alert("Không có học viên để export (hoặc không khớp từ khóa).");
+        return;
+      }
+
+      const doc = new jsPDF({
+        orientation: "landscape",
+        unit: "pt",
+        format: "a4",
+      });
+
+      await ensureVietnameseFont(doc);
+
+      const now = new Date();
+      const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(
+        2,
+        "0"
+      )}-${String(now.getDate()).padStart(2, "0")}_${String(
+        now.getHours()
+      ).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}`;
+
+      const MARGIN_X = 36;
+      const MARGIN_TOP = 36;
+
+      // Header
+      doc.setFont("RobotoCondensed", "bold");
+      doc.setFontSize(16);
+      doc.text("DANH SÁCH HỌC VIÊN THEO LỚP", MARGIN_X, MARGIN_TOP);
+
+      doc.setFont("RobotoCondensed", "normal");
+      doc.setFontSize(10);
+      doc.text(
+        `Lớp: ${cls.name} • ${cls.id} | Tổng: ${list.length} | Xuất lúc: ${formatDateTime(
+          now.toISOString()
+        )}`,
+        MARGIN_X,
+        MARGIN_TOP + 18
+      );
+
+      autoTable(doc, {
+        startY: MARGIN_TOP + 32,
+
+        // ✅ chống tràn ngang
+        tableWidth: "wrap",
+        margin: { left: MARGIN_X, right: MARGIN_X },
+
+        styles: {
+          font: "RobotoCondensed",
+          fontStyle: "normal",
+          fontSize: 9,
+          cellPadding: 4,
+          overflow: "linebreak",
+          cellWidth: "wrap",
+          valign: "middle",
+        },
+        headStyles: {
+          font: "RobotoCondensed",
+          fontStyle: "bold",
+          fontSize: 9,
+        },
+
+        columnStyles: {
+          0: { halign: "right", cellWidth: "auto" }, // STT
+          1: { cellWidth: "auto" }, // IDHocVien
+          2: { cellWidth: "auto" }, // Họ tên
+          3: { cellWidth: "wrap" }, // Email
+          4: { halign: "right", cellWidth: "auto" }, // SĐT
+          5: { cellWidth: "auto" }, // Ngày tạo
+        },
+
+        head: [["STT", "ID", "Họ tên", "Email", "SĐT", "Ngày tạo"]],
+
+        body: list.map((hv, idx) => {
+          const tk = hv.IDHocVien_detail?.TaiKhoan_detail;
+          return [
+            idx + 1,
+            safeStr(hv.IDHocVien) || "—",
+            safeStr(tk?.HoTen) || "—",
+            safeStr(tk?.Email ?? hv.IDHocVien) || "—",
+            safeStr(tk?.SoDienThoai) || "—",
+            formatDateTime(tk?.NgayTaoTaiKhoan),
+          ];
+        }),
+
+        showHead: "everyPage",
+
+        didDrawPage: () => {
+          const pageCount = doc.getNumberOfPages();
+          const pageCurrent = doc.getCurrentPageInfo().pageNumber;
+
+          doc.setFont("RobotoCondensed", "normal");
+          doc.setFontSize(9);
+          doc.text(
+            `Trang ${pageCurrent}/${pageCount}`,
+            doc.internal.pageSize.getWidth() - MARGIN_X,
+            doc.internal.pageSize.getHeight() - 18,
+            { align: "right" }
+          );
+        },
+      });
+
+      doc.save(`students_${cls.id}_${stamp}.pdf`);
+    } catch (e: any) {
+      alert(e?.message || "Export PDF thất bại");
+    }
+  }
 
   /** ===== Teachers options ===== */
   const teacherOptions = useMemo(() => {
@@ -593,9 +729,8 @@ export default function Class(): JSX.Element {
     try {
       const res = await http.get<Paginated<UserItem>>("/api/auth/users/");
 
-      // Lưu ý: bạn có thể bỏ filter is_active/BiVoHieuHoa nếu muốn add cả user bị vô hiệu hoá
       const list = (res.data.results ?? [])
-        .filter((u) => u.IDQuyen === 2) // chỉ học viên
+        .filter((u) => u.IDQuyen === 2)
         .filter((u) => u.is_active !== false)
         .filter((u) => u.BiVoHieuHoa !== true);
 
@@ -607,7 +742,6 @@ export default function Class(): JSX.Element {
     }
   }
 
-  // Set ID học viên đã có trong lớp (để ẩn khỏi dropdown)
   const existedStudentIdSet = useMemo(() => {
     const set = new Set<string>();
     (selectedClassApi?.hoc_vien ?? []).forEach((hv) => {
@@ -616,30 +750,21 @@ export default function Class(): JSX.Element {
     return set;
   }, [selectedClassApi?.hoc_vien]);
 
-  // Keyword search trong modal add student
   const addStudentKeyword = addStudentForms.watch("search_user") || "";
 
-  // Options học viên: chỉ role=2 + CHƯA có trong lớp + match keyword
   const studentOptions = useMemo(() => {
     const q = addStudentKeyword.trim().toLowerCase();
 
     const filtered = (users ?? []).filter((u) => {
       if (!u?.IDTaiKhoan) return false;
-
-      // ẩn user đã có trong lớp
       if (existedStudentIdSet.has(u.IDTaiKhoan)) return false;
-
       if (!q) return true;
 
       const name = (u.HoTen ?? "").toLowerCase();
       const email = (u.Email ?? "").toLowerCase();
       const id = u.IDTaiKhoan.toLowerCase();
 
-      return (
-        name.includes(q) ||
-        email.includes(q) ||
-        id.includes(q)
-      );
+      return name.includes(q) || email.includes(q) || id.includes(q);
     });
 
     return [
@@ -661,7 +786,6 @@ export default function Class(): JSX.Element {
     if (!classId) return alert("Chưa chọn lớp.");
     if (!studentId) return alert("❗ Vui lòng chọn học viên.");
 
-    // chặn add trùng (đã ẩn khỏi dropdown, nhưng vẫn check cho chắc)
     if (existedStudentIdSet.has(studentId)) {
       return alert("Học viên này đã có trong lớp.");
     }
@@ -672,7 +796,7 @@ export default function Class(): JSX.Element {
         IDHocVien: studentId,
       });
 
-      await fetchAll(); // reload để list học viên cập nhật
+      await fetchAll();
 
       addStudentForms.reset({ IDHocVien: "", search_user: "" });
       setOpenAddStudent(false);
@@ -752,21 +876,18 @@ export default function Class(): JSX.Element {
   return (
     <FormProvider {...forms}>
       <ContentLayoutWrapper heading="Quản lý lớp học">
-        {/* Error banner */}
         {errMsg ? (
           <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">
             {errMsg}
           </div>
         ) : null}
 
-        {/* Loading */}
         {loading && classData.length === 0 ? (
           <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4">
             Đang tải danh sách lớp...
           </div>
         ) : null}
 
-        {/* Header + switcher */}
         <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
           <div>
             <p className="m-0 text-base text-slate-500">
@@ -794,7 +915,6 @@ export default function Class(): JSX.Element {
           </div>
         </div>
 
-        {/* Stats */}
         <div className="mb-8 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_0_0_rgba(143,156,173,0.2)]">
             <div className="mb-1 text-3xl font-bold text-slate-800">
@@ -825,7 +945,6 @@ export default function Class(): JSX.Element {
           </div>
         </div>
 
-        {/* Search + actions */}
         <div className="mb-4 flex items-center justify-between gap-3">
           <div className="flex-1">
             <Input
@@ -854,7 +973,6 @@ export default function Class(): JSX.Element {
           </button>
         </div>
 
-        {/* List */}
         <ClassListPanel
           classData={classData}
           selectedId={selectedId}
@@ -873,7 +991,7 @@ export default function Class(): JSX.Element {
               Danh sách học viên ({filteredStudents.length})
             </h2>
 
-            <div className="flex gap-3">
+            <div className="flex flex-wrap gap-3">
               <Input
                 name="search_student"
                 type="search"
@@ -881,11 +999,21 @@ export default function Class(): JSX.Element {
                 inputClassName="focus:ring-4 focus:ring-violet-100"
               />
 
+              {/* ✅ Export PDF theo lớp */}
+              <button
+                type="button"
+                onClick={exportStudentsByClassPdf}
+                className="h-10 rounded-xl border border-slate-200 bg-white px-4 font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 active:scale-[0.99] disabled:opacity-60"
+                disabled={loading || !selectedId}
+                title="Export PDF danh sách học viên của lớp đang chọn (theo keyword tìm kiếm)"
+              >
+                Export PDF
+              </button>
+
               <button
                 type="button"
                 onClick={async () => {
                   setOpenAddStudent(true);
-                  // load users nếu chưa có
                   if (users.length === 0) await fetchUsers();
                 }}
                 className="h-10 rounded-xl bg-violet-600 px-4 font-semibold text-white hover:bg-violet-700"
@@ -905,7 +1033,6 @@ export default function Class(): JSX.Element {
                   <th>Tổng điểm</th>
                   <th>Tiến độ</th>
                   <th>Trạng thái</th>
-                  {/* <th>Hành động</th> */}
                 </tr>
               </thead>
 
@@ -941,14 +1068,6 @@ export default function Class(): JSX.Element {
                       <td className="px-4 py-4">-</td>
                       <td className="px-4 py-4">-</td>
                       <td className="px-4 py-4">-</td>
-                      {/* <td className="px-4 py-4">
-                        <button
-                          type="button"
-                          className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
-                        >
-                          Xem
-                        </button>
-                      </td> */}
                     </tr>
                   );
                 })}
@@ -982,7 +1101,26 @@ export default function Class(): JSX.Element {
             width={720}
             closeOnOverlayClick={!saving}
             closeOnEsc={!saving}
-            footer={addFooter}
+            footer={
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setOpenAdd(false)}
+                  className="h-10 rounded-xl border border-slate-200 bg-white px-4 font-semibold text-slate-700 hover:bg-slate-50"
+                  disabled={saving}
+                >
+                  Huỷ
+                </button>
+                <button
+                  type="button"
+                  onClick={addForms.handleSubmit(handleAddClass)}
+                  className="h-10 rounded-xl bg-violet-600 px-4 font-semibold text-white hover:bg-violet-700 disabled:opacity-60"
+                  disabled={saving}
+                >
+                  {saving ? "Đang lưu..." : "Tạo lớp"}
+                </button>
+              </div>
+            }
           >
             <div className="grid grid-cols-1 gap-4">
               <Input
@@ -1018,7 +1156,7 @@ export default function Class(): JSX.Element {
         </FormProvider>
 
         {/* =======================
-         * Modal Edit Class (PATCH)
+         * Modal Edit Class
          * ======================= */}
         <FormProvider {...editForms}>
           <Modal
@@ -1031,7 +1169,26 @@ export default function Class(): JSX.Element {
             width={720}
             closeOnOverlayClick={!savingEdit}
             closeOnEsc={!savingEdit}
-            footer={editFooter}
+            footer={
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setOpenEdit(false)}
+                  className="h-10 rounded-xl border border-slate-200 bg-white px-4 font-semibold text-slate-700 hover:bg-slate-50"
+                  disabled={savingEdit}
+                >
+                  Huỷ
+                </button>
+                <button
+                  type="button"
+                  onClick={editForms.handleSubmit(handleEditClass)}
+                  className="h-10 rounded-xl bg-amber-600 px-4 font-semibold text-white hover:bg-amber-700 disabled:opacity-60"
+                  disabled={savingEdit}
+                >
+                  {savingEdit ? "Đang lưu..." : "Lưu thay đổi"}
+                </button>
+              </div>
+            }
           >
             <div className="grid grid-cols-1 gap-4">
               <Input
@@ -1070,9 +1227,7 @@ export default function Class(): JSX.Element {
         </FormProvider>
 
         {/* =======================
-         * Modal Add Student to Class (PATCH)
-         * - có search keyword
-         * - ẩn học viên đã có trong lớp
+         * Modal Add Student to Class
          * ======================= */}
         <FormProvider {...addStudentForms}>
           <Modal
@@ -1085,7 +1240,26 @@ export default function Class(): JSX.Element {
             width={720}
             closeOnOverlayClick={!addingStudent}
             closeOnEsc={!addingStudent}
-            footer={addStudentFooter}
+            footer={
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setOpenAddStudent(false)}
+                  className="h-10 rounded-xl border border-slate-200 bg-white px-4 font-semibold text-slate-700 hover:bg-slate-50"
+                  disabled={addingStudent}
+                >
+                  Huỷ
+                </button>
+                <button
+                  type="button"
+                  onClick={addStudentForms.handleSubmit(handleAddStudent)}
+                  className="h-10 rounded-xl bg-violet-600 px-4 font-semibold text-white hover:bg-violet-700 disabled:opacity-60"
+                  disabled={addingStudent}
+                >
+                  {addingStudent ? "Đang thêm..." : "Thêm vào lớp"}
+                </button>
+              </div>
+            }
           >
             <div className="grid grid-cols-1 gap-4">
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
@@ -1095,7 +1269,6 @@ export default function Class(): JSX.Element {
                 </span>
               </div>
 
-              {/* Search keyword (lọc options dropdown) */}
               <Input
                 name="search_user"
                 type="search"
@@ -1146,3 +1319,1153 @@ export default function Class(): JSX.Element {
     </FormProvider>
   );
 }
+
+
+// import React, { useEffect, useMemo, useState, type JSX } from "react";
+// import { FormProvider, useForm } from "react-hook-form";
+
+// import { Input } from "elements";
+// import { DropdownSelectPortal } from "elements/dropdown/dropdown";
+// import { ContentLayoutWrapper } from "~/layouts/admin-layout/items/content-layout-wrapper";
+// import { http } from "utils/libs/https";
+// import { Modal } from "elements/modal/modal";
+// import { useAuth } from "hooks/useAuth";
+
+// /** =======================
+//  * API Types (theo response backend)
+//  * ======================= */
+// type TeacherItem = {
+//   GiaoVienID: string;
+//   TaiKhoan: string;
+//   TaiKhoan_detail?: {
+//     IDTaiKhoan: string;
+//     Email: string;
+//     HoTen: string;
+//     AnhDaiDien: string | null;
+//     SoDienThoai: number | null;
+//     NgayTaoTaiKhoan: string;
+//     TrangThaiTaiKhoan: any | null;
+//     IDQuyen: number;
+//     IDQuyen_detail?: {
+//       IDQuyen: number;
+//       TenQuyen: string;
+//     };
+//   };
+// };
+
+// type LopHocApi = {
+//   IDLopHoc: string;
+//   TenLopHoc: string;
+//   MoTa: string;
+//   IDGiaoVien: string;
+
+//   hoc_vien: Array<{
+//     LopHocID: string;
+//     IDHocVien: string;
+//     IDHocVien_detail: {
+//       HocVienID: string;
+//       TaiKhoan_detail: {
+//         IDTaiKhoan: string;
+//         Email: string;
+//         HoTen: string;
+//         AnhDaiDien: string | null;
+//         SoDienThoai: number | null;
+//         NgayTaoTaiKhoan: string;
+//         TrangThaiTaiKhoan: any | null;
+//         IDQuyen: number;
+//       };
+//     };
+//   }>;
+
+//   so_hoc_vien: number;
+
+//   // NOTE: bạn đang dùng filter theo item?.IDGiaoVien_detail... nên backend có thể có field này.
+//   // Nếu TypeScript báo lỗi thì thêm optional vào:
+//   IDGiaoVien_detail?: any;
+// };
+
+// type UserItem = {
+//   IDTaiKhoan: string;
+//   Email: string;
+//   HoTen: string;
+//   AnhDaiDien: string | null;
+//   SoDienThoai: number | null;
+//   NgayTaoTaiKhoan: string;
+//   TrangThaiTaiKhoan: any | null;
+//   IDQuyen: number;
+//   IDQuyen_detail?: { IDQuyen: number; TenQuyen: string };
+//   BiVoHieuHoa: boolean;
+//   is_active: boolean;
+// };
+
+// type Paginated<T> = {
+//   count: number;
+//   next: string | null;
+//   previous: string | null;
+//   results: T[];
+// };
+
+// /** =======================
+//  * UI Types
+//  * ======================= */
+// type ClassId = string;
+
+// type ClassItem = {
+//   id: ClassId; // = IDLopHoc
+//   name: string; // = TenLopHoc
+//   semester: string; // backend chưa có
+//   studentCount: number; // = so_hoc_vien
+//   avgScore: string; // backend chưa có
+//   completion: number; // backend chưa có
+//   pending: number; // backend chưa có
+//   color: `#${string}`;
+//   description: string
+// };
+
+// type ClassListPanelProps = {
+//   classData: ClassItem[];
+//   selectedId: ClassId;
+//   onSelectClass: (id: ClassId) => void;
+//   onDeleteClass: (id: ClassId) => void;
+//   onEditClass: (id: ClassId) => void;
+//   onManage?: () => void;
+//   keyword: string;
+//   deletingId?: string | null;
+// };
+
+// /** =======================
+//  * Helpers
+//  * ======================= */
+// function hexToRgba(hex: string, alpha = 0.12): string {
+//   if (!hex) return `rgba(124, 58, 237, ${alpha})`;
+//   const normalized = hex.replace("#", "");
+//   const isShort = normalized.length === 3;
+//   const full = isShort
+//     ? normalized
+//         .split("")
+//         .map((c) => c + c)
+//         .join("")
+//     : normalized;
+
+//   const r = parseInt(full.slice(0, 2), 16);
+//   const g = parseInt(full.slice(2, 4), 16);
+//   const b = parseInt(full.slice(4, 6), 16);
+//   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+// }
+
+// function colorFromId(id: string): `#${string}` {
+//   const palette = [
+//     "#7C3AED",
+//     "#2563EB",
+//     "#F59E0B",
+//     "#0EA5E9",
+//     "#10B981",
+//     "#EC4899",
+//     "#F97316",
+//     "#6366F1",
+//   ] as const;
+
+//   let hash = 0;
+//   for (let i = 0; i < id.length; i++)
+//     hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+//   return palette[hash % palette.length];
+// }
+
+// function getInitials(name?: string) {
+//   if (!name) return "?";
+//   return (
+//     name
+//       .trim()
+//       .split(/\s+/)
+//       .slice(0, 2)
+//       .map((w) => (w[0] ? w[0].toUpperCase() : ""))
+//       .join("") || "?"
+//   );
+// }
+
+// function getApiErrorMessage(err: any) {
+//   const data = err?.response?.data;
+//   if (!data) return err?.message || "Có lỗi xảy ra.";
+//   if (typeof data?.detail === "string") return data.detail;
+//   if (typeof data?.message === "string") return data.message;
+//   if (Array.isArray(data)) return data[0];
+//   const firstKey = Object.keys(data)[0];
+//   const val = data[firstKey];
+//   if (Array.isArray(val)) return val[0];
+//   if (typeof val === "string") return val;
+//   return "Có lỗi xảy ra.";
+// }
+
+// const StatPill: React.FC<React.PropsWithChildren> = ({ children }) => (
+//   <span className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-[13px] font-semibold text-slate-700">
+//     {children}
+//   </span>
+// );
+
+// /** =======================
+//  * Component: ClassListPanel
+//  * ======================= */
+// const ClassListPanel: React.FC<ClassListPanelProps> = ({
+//   classData,
+//   selectedId,
+//   onSelectClass,
+//   onDeleteClass,
+//   onEditClass,
+//   onManage,
+//   keyword,
+//   deletingId,
+// }) => {
+//   const filtered = useMemo(() => {
+//     const q = keyword.trim().toLowerCase();
+//     if (!q) return classData;
+//     return classData.filter(
+//       (c) => c.name.toLowerCase().includes(q) || c.id.toLowerCase().includes(q)
+//     );
+//   }, [classData, keyword]);
+
+//   return (
+//     <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_4px_0_0_rgba(143,156,173,0.2)]">
+//       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+//         <div>
+//           <h2 className="m-0 text-xl font-bold text-slate-800">
+//             Quản lý lớp học
+//           </h2>
+//           <p className="mt-1 text-slate-500">
+//             Chọn lớp để xem danh sách học viên.
+//           </p>
+//         </div>
+
+//         <div className="flex flex-wrap items-center gap-2.5">
+//           <div className="min-w-22.5 text-right font-semibold text-slate-700">
+//             {filtered.length} lớp
+//           </div>
+
+//           <button
+//             type="button"
+//             onClick={onManage}
+//             className="h-10 rounded-xl border border-slate-200 bg-white px-4 font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 active:scale-[0.99]"
+//           >
+//             Thêm / quản lý lớp
+//           </button>
+//         </div>
+//       </div>
+
+//       <div className="max-h-125 py-3 overflow-auto pr-1 [scrollbar-width:thin] [scrollbar-color:#CBD5E1_transparent] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300">
+//         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+//           {filtered.map((cls) => {
+//             const isActive = cls.id === selectedId;
+
+//             return (
+//               <div
+//                 key={cls.id}
+//                 className={[
+//                   "flex flex-col gap-3 rounded-2xl border bg-white p-4 shadow-[0_4px_0_0_rgba(143,156,173,0.2)] transition",
+//                   isActive
+//                     ? "border-violet-300 ring-4 ring-violet-100"
+//                     : "border-slate-200",
+//                 ].join(" ")}
+//               >
+//                 <div className="flex items-start justify-between gap-3">
+//                   <div className="min-w-0">
+//                     <div className="text-base font-bold text-slate-800 truncate">
+//                       {cls.name} - <span className="text-[13px] text-slate-500 truncate">
+//                       {cls.id}
+//                     </span>
+//                     </div>
+                    
+//                     <div className="text-[13px] text-slate-500 truncate">
+//                       {cls.description}
+//                     </div>
+//                   </div>
+
+//                   <span
+//                     className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold"
+//                     style={{
+//                       background: hexToRgba(cls.color, 0.12),
+//                       color: cls.color,
+//                     }}
+//                   >
+//                     Lớp
+//                   </span>
+//                 </div>
+
+//                 <div className="flex flex-wrap gap-2">
+//                   <StatPill>👥 {cls.studentCount} HV</StatPill>
+//                   {/* <StatPill>📈 {cls.avgScore} TB</StatPill>
+//                   <StatPill>✅ {cls.completion}% HT</StatPill>
+//                   <StatPill>⏳ {cls.pending} bài đợi</StatPill> */}
+//                 </div>
+
+//                 <div className="flex gap-2">
+//                   <button
+//                     type="button"
+//                     onClick={() => onSelectClass(cls.id)}
+//                     className="h-10 flex-1 rounded-xl border border-blue-200 bg-blue-50 px-4 font-semibold text-blue-700 transition hover:bg-blue-100 hover:border-blue-300 active:scale-[0.99]"
+//                   >
+//                     Xem
+//                   </button>
+
+//                   <button
+//                     type="button"
+//                     onClick={() => onEditClass(cls.id)}
+//                     className="h-10 rounded-xl border border-amber-200 bg-amber-50 px-4 font-semibold text-amber-800 transition hover:bg-amber-100 hover:border-amber-300 active:scale-[0.99]"
+//                   >
+//                     Sửa
+//                   </button>
+
+//                   <button
+//                     type="button"
+//                     onClick={() => onDeleteClass(cls.id)}
+//                     disabled={deletingId === cls.id}
+//                     className="h-10 rounded-xl border border-red-200 bg-red-50 px-4 font-semibold text-red-700 transition hover:bg-red-100 hover:border-red-300 active:scale-[0.99] disabled:opacity-60"
+//                   >
+//                     {deletingId === cls.id ? "Đang xoá..." : "Xoá"}
+//                   </button>
+//                 </div>
+//               </div>
+//             );
+//           })}
+
+//           {filtered.length === 0 && (
+//             <div className="col-span-full rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-slate-600">
+//               Không tìm thấy lớp phù hợp.
+//             </div>
+//           )}
+//         </div>
+//       </div>
+//     </div>
+//   );
+// };
+
+// /** =======================
+//  * Page
+//  * ======================= */
+// type FormValues = {
+//   class: string; // value = IDLopHoc
+//   search_class: string;
+//   search_student: string;
+// };
+
+// type AddClassForm = {
+//   IDLopHoc: string;
+//   TenLopHoc: string;
+//   MoTa: string;
+//   IDGiaoVien: string;
+// };
+
+// type EditClassForm = {
+//   IDLopHoc: string; // readonly (ID để patch)
+//   TenLopHoc: string;
+//   MoTa: string;
+//   IDGiaoVien: string;
+// };
+
+// type AddStudentForm = {
+//   IDHocVien: string; // = IDTaiKhoan (role=2)
+//   search_user: string; // keyword search trong dropdown
+// };
+
+// export default function Class(): JSX.Element {
+//   const { user } = useAuth();
+
+//   const forms = useForm<FormValues>({
+//     defaultValues: { class: "", search_class: "", search_student: "" },
+//   });
+
+//   const addForms = useForm<AddClassForm>({
+//     defaultValues: { IDLopHoc: "", TenLopHoc: "", MoTa: "", IDGiaoVien: "" },
+//   });
+
+//   const editForms = useForm<EditClassForm>({
+//     defaultValues: { IDLopHoc: "", TenLopHoc: "", MoTa: "", IDGiaoVien: "" },
+//   });
+
+//   const addStudentForms = useForm<AddStudentForm>({
+//     defaultValues: { IDHocVien: "", search_user: "" },
+//   });
+
+//   const [rawClasses, setRawClasses] = useState<LopHocApi[]>([]);
+//   const [teachers, setTeachers] = useState<TeacherItem[]>([]);
+//   const [loading, setLoading] = useState<boolean>(false);
+//   const [errMsg, setErrMsg] = useState<string | null>(null);
+
+//   const [openAdd, setOpenAdd] = useState(false);
+//   const [openEdit, setOpenEdit] = useState(false);
+
+//   const [saving, setSaving] = useState(false);
+//   const [savingEdit, setSavingEdit] = useState(false);
+//   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+//   // ===== Add student modal state =====
+//   const [openAddStudent, setOpenAddStudent] = useState(false);
+//   const [users, setUsers] = useState<UserItem[]>([]);
+//   const [loadingUsers, setLoadingUsers] = useState(false);
+//   const [addingStudent, setAddingStudent] = useState(false);
+
+//   /** ===== Fetch Classes + Teachers ===== */
+//   async function fetchAll() {
+//     setLoading(true);
+//     setErrMsg(null);
+//     try {
+//       const [clsRes, tRes] = await Promise.all([
+//         http.get<Paginated<LopHocApi>>("/api/classes/lop-hoc/"),
+//         http.get<Paginated<TeacherItem>>("/api/auth/teachers/"),
+//       ]);
+
+//       setRawClasses(
+//         clsRes.data.results?.filter(
+//           (item: any) =>
+//             item?.IDGiaoVien_detail?.TaiKhoan_detail?.Email === user?.Email
+//         ) ?? []
+//       );
+//       setTeachers(tRes.data.results ?? []);
+//     } catch (e: any) {
+//       setErrMsg(getApiErrorMessage(e));
+//     } finally {
+//       setLoading(false);
+//     }
+//   }
+
+//   useEffect(() => {
+//     fetchAll();
+//   }, [user]);
+
+//   /** ===== Map API -> UI ===== */
+//   const classData = useMemo<ClassItem[]>(() => {
+//     return (rawClasses || []).map((c) => ({
+//       id: c.IDLopHoc,
+//       name: c.TenLopHoc,
+//       semester: "-",
+//       studentCount: c.so_hoc_vien ?? 0,
+//       avgScore: "-",
+//       completion: 0,
+//       pending: 0,
+//       color: colorFromId(c.IDLopHoc),
+//       description: c.MoTa,
+//     }));
+//   }, [rawClasses]);
+
+//   /** ===== Auto set default selected class ===== */
+//   useEffect(() => {
+//     if (!classData.length) return;
+//     const current = forms.getValues("class");
+//     if (!current) forms.setValue("class", classData[0].id);
+//     // eslint-disable-next-line react-hooks/exhaustive-deps
+//   }, [classData.length]);
+
+//   /** ===== Selected from RHF ===== */
+//   const selectedId = forms.watch("class") || classData[0]?.id || "";
+//   const keywordClass = forms.watch("search_class") || "";
+//   const keywordStudent = forms.watch("search_student") || "";
+
+//   const selectedClassUI = useMemo(() => {
+//     return classData.find((c) => c.id === selectedId) ?? classData[0];
+//   }, [classData, selectedId]);
+
+//   const selectedClassApi = useMemo(() => {
+//     return rawClasses.find((c) => c.IDLopHoc === selectedId) ?? rawClasses[0];
+//   }, [rawClasses, selectedId]);
+
+//   /** ===== Filter học viên ===== */
+//   const filteredStudents = useMemo(() => {
+//     const list = selectedClassApi?.hoc_vien ?? [];
+//     const q = keywordStudent.trim().toLowerCase();
+//     if (!q) return list;
+//     return list.filter((hv) => {
+//       const tk = hv.IDHocVien_detail?.TaiKhoan_detail;
+//       const name = tk?.HoTen ?? "";
+//       const email = tk?.Email ?? hv.IDHocVien ?? "";
+//       return name.toLowerCase().includes(q) || email.toLowerCase().includes(q);
+//     });
+//   }, [selectedClassApi, keywordStudent]);
+
+//   /** ===== Teachers options ===== */
+//   const teacherOptions = useMemo(() => {
+//     return [
+//       { label: "Chọn giáo viên", value: "" },
+//       ...(teachers || []).map((t) => {
+//         const name = t?.TaiKhoan_detail?.HoTen || t.GiaoVienID;
+//         const email = t?.TaiKhoan_detail?.Email;
+//         return {
+//           label: email ? `${name} • ${email}` : name,
+//           value: t.GiaoVienID,
+//         };
+//       }),
+//     ];
+//   }, [teachers]);
+
+//   /** =======================
+//    * ADD CLASS (POST)
+//    * ======================= */
+//   async function handleAddClass(values: AddClassForm) {
+//     if (!values.IDLopHoc.trim()) return alert("❗ Vui lòng nhập IDLopHoc");
+//     if (!values.TenLopHoc.trim()) return alert("❗ Vui lòng nhập TenLopHoc");
+//     if (!values.IDGiaoVien.trim()) return alert("❗ Vui lòng chọn giáo viên");
+
+//     setSaving(true);
+//     try {
+//       const payload = {
+//         IDLopHoc: values.IDLopHoc.trim(),
+//         TenLopHoc: values.TenLopHoc.trim(),
+//         MoTa: values.MoTa?.trim() || "",
+//         IDGiaoVien: values.IDGiaoVien.trim(),
+//       };
+
+//       const res = await http.post<LopHocApi>("/api/classes/lop-hoc/", payload);
+
+//       setRawClasses((prev) => [res.data, ...prev]);
+//       forms.setValue("class", res.data.IDLopHoc);
+
+//       addForms.reset({ IDLopHoc: "", TenLopHoc: "", MoTa: "", IDGiaoVien: "" });
+//       setOpenAdd(false);
+
+//       alert("✅ Tạo lớp thành công");
+//     } catch (e: any) {
+//       alert(getApiErrorMessage(e));
+//     } finally {
+//       setSaving(false);
+//     }
+//   }
+
+//   /** =======================
+//    * OPEN EDIT MODAL
+//    * ======================= */
+//   function openEditModal(classId: string) {
+//     const cls = rawClasses.find((c) => c.IDLopHoc === classId);
+//     if (!cls) return alert("Không tìm thấy lớp để sửa.");
+
+//     editForms.reset({
+//       IDLopHoc: cls.IDLopHoc,
+//       TenLopHoc: cls.TenLopHoc || "",
+//       MoTa: cls.MoTa || "",
+//       IDGiaoVien: cls.IDGiaoVien || "",
+//     });
+
+//     setOpenEdit(true);
+//   }
+
+//   /** =======================
+//    * EDIT CLASS (PATCH)
+//    * ======================= */
+//   async function handleEditClass(values: EditClassForm) {
+//     const id = values.IDLopHoc?.trim();
+//     if (!id) return alert("Thiếu IDLopHoc để sửa.");
+//     if (!values.TenLopHoc.trim()) return alert("❗ Vui lòng nhập TenLopHoc");
+//     if (!values.IDGiaoVien.trim()) return alert("❗ Vui lòng chọn giáo viên");
+
+//     setSavingEdit(true);
+//     try {
+//       const payload: Partial<LopHocApi> = {
+//         TenLopHoc: values.TenLopHoc.trim(),
+//         MoTa: values.MoTa?.trim() || "",
+//         IDGiaoVien: values.IDGiaoVien.trim(),
+//       };
+
+//       const res = await http.patch<LopHocApi>(
+//         `/api/classes/lop-hoc/${id}/`,
+//         payload
+//       );
+
+//       setRawClasses((prev) =>
+//         prev.map((c) => (c.IDLopHoc === id ? { ...c, ...res.data } : c))
+//       );
+
+//       setOpenEdit(false);
+//       alert("✅ Cập nhật lớp thành công");
+//     } catch (e: any) {
+//       alert(getApiErrorMessage(e));
+//     } finally {
+//       setSavingEdit(false);
+//     }
+//   }
+
+//   /** =======================
+//    * DELETE CLASS (DELETE)
+//    * ======================= */
+//   async function handleDeleteClass(id: string) {
+//     const ok = window.confirm(
+//       `Sếp có chắc chắn muốn xoá lớp học "${id}" không?\nHành động này KHÔNG thể hoàn tác.`
+//     );
+//     if (!ok) return;
+
+//     setDeletingId(id);
+//     try {
+//       await http.delete(`/api/classes/lop-hoc/${id}/`);
+
+//       setRawClasses((prev) => prev.filter((c) => c.IDLopHoc !== id));
+
+//       const current = forms.getValues("class");
+//       if (current === id) {
+//         const remaining = rawClasses.filter((c) => c.IDLopHoc !== id);
+//         forms.setValue("class", remaining[0]?.IDLopHoc || "");
+//       }
+
+//       alert("✅ Đã xoá lớp học thành công");
+//     } catch (e: any) {
+//       alert(getApiErrorMessage(e));
+//     } finally {
+//       setDeletingId(null);
+//     }
+//   }
+
+//   /** =======================
+//    * USERS: fetch + options (role=2)
+//    * ======================= */
+//   async function fetchUsers() {
+//     setLoadingUsers(true);
+//     try {
+//       const res = await http.get<Paginated<UserItem>>("/api/auth/users/");
+
+//       // Lưu ý: bạn có thể bỏ filter is_active/BiVoHieuHoa nếu muốn add cả user bị vô hiệu hoá
+//       const list = (res.data.results ?? [])
+//         .filter((u) => u.IDQuyen === 2) // chỉ học viên
+//         .filter((u) => u.is_active !== false)
+//         .filter((u) => u.BiVoHieuHoa !== true);
+
+//       setUsers(list);
+//     } catch (e: any) {
+//       alert(getApiErrorMessage(e));
+//     } finally {
+//       setLoadingUsers(false);
+//     }
+//   }
+
+//   // Set ID học viên đã có trong lớp (để ẩn khỏi dropdown)
+//   const existedStudentIdSet = useMemo(() => {
+//     const set = new Set<string>();
+//     (selectedClassApi?.hoc_vien ?? []).forEach((hv) => {
+//       if (hv?.IDHocVien) set.add(hv.IDHocVien);
+//     });
+//     return set;
+//   }, [selectedClassApi?.hoc_vien]);
+
+//   // Keyword search trong modal add student
+//   const addStudentKeyword = addStudentForms.watch("search_user") || "";
+
+//   // Options học viên: chỉ role=2 + CHƯA có trong lớp + match keyword
+//   const studentOptions = useMemo(() => {
+//     const q = addStudentKeyword.trim().toLowerCase();
+
+//     const filtered = (users ?? []).filter((u) => {
+//       if (!u?.IDTaiKhoan) return false;
+
+//       // ẩn user đã có trong lớp
+//       if (existedStudentIdSet.has(u.IDTaiKhoan)) return false;
+
+//       if (!q) return true;
+
+//       const name = (u.HoTen ?? "").toLowerCase();
+//       const email = (u.Email ?? "").toLowerCase();
+//       const id = u.IDTaiKhoan.toLowerCase();
+
+//       return (
+//         name.includes(q) ||
+//         email.includes(q) ||
+//         id.includes(q)
+//       );
+//     });
+
+//     return [
+//       { label: "Chọn học viên", value: "" },
+//       ...filtered.map((u) => ({
+//         label: `${u.HoTen || u.IDTaiKhoan} • ${u.Email || "-"}`,
+//         value: u.IDTaiKhoan,
+//       })),
+//     ];
+//   }, [users, existedStudentIdSet, addStudentKeyword]);
+
+//   /** =======================
+//    * ADD STUDENT (PATCH)
+//    * ======================= */
+//   async function handleAddStudent(values: AddStudentForm) {
+//     const classId = selectedId;
+//     const studentId = values.IDHocVien?.trim();
+
+//     if (!classId) return alert("Chưa chọn lớp.");
+//     if (!studentId) return alert("❗ Vui lòng chọn học viên.");
+
+//     // chặn add trùng (đã ẩn khỏi dropdown, nhưng vẫn check cho chắc)
+//     if (existedStudentIdSet.has(studentId)) {
+//       return alert("Học viên này đã có trong lớp.");
+//     }
+
+//     setAddingStudent(true);
+//     try {
+//       await http.patch(`/api/classes/chi-tiet-lop-hoc/${classId}/`, {
+//         IDHocVien: studentId,
+//       });
+
+//       await fetchAll(); // reload để list học viên cập nhật
+
+//       addStudentForms.reset({ IDHocVien: "", search_user: "" });
+//       setOpenAddStudent(false);
+
+//       alert("✅ Đã thêm học viên vào lớp");
+//     } catch (e: any) {
+//       alert(getApiErrorMessage(e));
+//     } finally {
+//       setAddingStudent(false);
+//     }
+//   }
+
+//   /** ===== Modal footers ===== */
+//   const addFooter = (
+//     <div className="flex items-center justify-end gap-2">
+//       <button
+//         type="button"
+//         onClick={() => setOpenAdd(false)}
+//         className="h-10 rounded-xl border border-slate-200 bg-white px-4 font-semibold text-slate-700 hover:bg-slate-50"
+//         disabled={saving}
+//       >
+//         Huỷ
+//       </button>
+//       <button
+//         type="button"
+//         onClick={addForms.handleSubmit(handleAddClass)}
+//         className="h-10 rounded-xl bg-violet-600 px-4 font-semibold text-white hover:bg-violet-700 disabled:opacity-60"
+//         disabled={saving}
+//       >
+//         {saving ? "Đang lưu..." : "Tạo lớp"}
+//       </button>
+//     </div>
+//   );
+
+//   const editFooter = (
+//     <div className="flex items-center justify-end gap-2">
+//       <button
+//         type="button"
+//         onClick={() => setOpenEdit(false)}
+//         className="h-10 rounded-xl border border-slate-200 bg-white px-4 font-semibold text-slate-700 hover:bg-slate-50"
+//         disabled={savingEdit}
+//       >
+//         Huỷ
+//       </button>
+//       <button
+//         type="button"
+//         onClick={editForms.handleSubmit(handleEditClass)}
+//         className="h-10 rounded-xl bg-amber-600 px-4 font-semibold text-white hover:bg-amber-700 disabled:opacity-60"
+//         disabled={savingEdit}
+//       >
+//         {savingEdit ? "Đang lưu..." : "Lưu thay đổi"}
+//       </button>
+//     </div>
+//   );
+
+//   const addStudentFooter = (
+//     <div className="flex items-center justify-end gap-2">
+//       <button
+//         type="button"
+//         onClick={() => setOpenAddStudent(false)}
+//         className="h-10 rounded-xl border border-slate-200 bg-white px-4 font-semibold text-slate-700 hover:bg-slate-50"
+//         disabled={addingStudent}
+//       >
+//         Huỷ
+//       </button>
+//       <button
+//         type="button"
+//         onClick={addStudentForms.handleSubmit(handleAddStudent)}
+//         className="h-10 rounded-xl bg-violet-600 px-4 font-semibold text-white hover:bg-violet-700 disabled:opacity-60"
+//         disabled={addingStudent}
+//       >
+//         {addingStudent ? "Đang thêm..." : "Thêm vào lớp"}
+//       </button>
+//     </div>
+//   );
+
+//   return (
+//     <FormProvider {...forms}>
+//       <ContentLayoutWrapper heading="Quản lý lớp học">
+//         {/* Error banner */}
+//         {errMsg ? (
+//           <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">
+//             {errMsg}
+//           </div>
+//         ) : null}
+
+//         {/* Loading */}
+//         {loading && classData.length === 0 ? (
+//           <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4">
+//             Đang tải danh sách lớp...
+//           </div>
+//         ) : null}
+
+//         {/* Header + switcher */}
+//         <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
+//           <div>
+//             <p className="m-0 text-base text-slate-500">
+//               Lớp{" "}
+//               <span
+//                 className="font-semibold"
+//                 style={{ color: selectedClassUI?.color ?? "#7C3AED" }}
+//               >
+//                 {selectedClassUI?.name ?? "-"}
+//               </span>{" "}
+//               • <span>{selectedClassUI?.id ?? "-"}</span>
+//             </p>
+//           </div>
+
+//           <div className="flex items-center gap-3">
+//             <label className="font-semibold text-slate-800">Chọn lớp:</label>
+
+//             <DropdownSelectPortal
+//               name="class"
+//               placeholder="Chọn lớp học"
+//               options={classData.map((c) => ({ label: c.name, value: c.id }))}
+//               menuWidth={320}
+//               placement="bottom"
+//             />
+//           </div>
+//         </div>
+
+//         {/* Stats */}
+//         <div className="mb-8 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+//           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_0_0_rgba(143,156,173,0.2)]">
+//             <div className="mb-1 text-3xl font-bold text-slate-800">
+//               {selectedClassUI?.studentCount ?? 0}
+//             </div>
+//             <div className="text-sm text-slate-500">Tổng học viên</div>
+//           </div>
+
+//           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_0_0_rgba(143,156,173,0.2)]">
+//             <div className="mb-1 text-3xl font-bold text-slate-800">
+//               {selectedClassUI?.avgScore ?? "-"}
+//             </div>
+//             <div className="text-sm text-slate-500">Điểm TB lớp</div>
+//           </div>
+
+//           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_0_0_rgba(143,156,173,0.2)]">
+//             <div className="mb-1 text-3xl font-bold text-slate-800">
+//               {selectedClassUI?.completion ?? 0}%
+//             </div>
+//             <div className="text-sm text-slate-500">Tỷ lệ hoàn thành</div>
+//           </div>
+
+//           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_0_0_rgba(143,156,173,0.2)]">
+//             <div className="mb-1 text-3xl font-bold text-slate-800">
+//               {selectedClassUI?.pending ?? 0}
+//             </div>
+//             <div className="text-sm text-slate-500">Bài tập chưa chấm</div>
+//           </div>
+//         </div>
+
+//         {/* Search + actions */}
+//         <div className="mb-4 flex items-center justify-between gap-3">
+//           <div className="flex-1">
+//             <Input
+//               name="search_class"
+//               type="search"
+//               placeholder="Tìm lớp..."
+//               inputClassName="focus:ring-4 focus:ring-violet-100"
+//             />
+//           </div>
+
+//           <button
+//             type="button"
+//             onClick={() => setOpenAdd(true)}
+//             className="h-10 rounded-xl bg-violet-600 px-4 font-semibold text-white hover:bg-violet-700"
+//           >
+//             + Thêm lớp
+//           </button>
+
+//           <button
+//             type="button"
+//             onClick={fetchAll}
+//             className="h-10 rounded-xl border border-slate-200 bg-white px-4 font-semibold text-slate-700 hover:bg-slate-50"
+//             disabled={loading}
+//           >
+//             {loading ? "Đang tải..." : "Reload"}
+//           </button>
+//         </div>
+
+//         {/* List */}
+//         <ClassListPanel
+//           classData={classData}
+//           selectedId={selectedId}
+//           onSelectClass={(id) => forms.setValue("class", id)}
+//           onEditClass={(id) => openEditModal(id)}
+//           onDeleteClass={handleDeleteClass}
+//           onManage={() => setOpenAdd(true)}
+//           keyword={keywordClass}
+//           deletingId={deletingId}
+//         />
+
+//         {/* Students */}
+//         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_4px_0_0_rgba(143,156,173,0.2)]">
+//           <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+//             <h2 className="m-0 text-xl font-bold text-slate-800">
+//               Danh sách học viên ({filteredStudents.length})
+//             </h2>
+
+//             <div className="flex gap-3">
+//               <Input
+//                 name="search_student"
+//                 type="search"
+//                 placeholder="Tìm học viên..."
+//                 inputClassName="focus:ring-4 focus:ring-violet-100"
+//               />
+
+//               <button
+//                 type="button"
+//                 onClick={async () => {
+//                   setOpenAddStudent(true);
+//                   // load users nếu chưa có
+//                   if (users.length === 0) await fetchUsers();
+//                 }}
+//                 className="h-10 rounded-xl bg-violet-600 px-4 font-semibold text-white hover:bg-violet-700"
+//               >
+//                 + Thêm học viên
+//               </button>
+//             </div>
+//           </div>
+
+//           <div className="overflow-x-auto rounded-xl border border-slate-200">
+//             <table className="w-full min-w-225 border-separate border-spacing-0">
+//               <thead className="bg-slate-50">
+//                 <tr className="[&>th]:px-4 [&>th]:py-3 [&>th]:text-left [&>th]:text-sm [&>th]:font-semibold [&>th]:text-slate-700">
+//                   <th>Học viên</th>
+//                   <th>Điểm Listening</th>
+//                   <th>Điểm Reading</th>
+//                   <th>Tổng điểm</th>
+//                   <th>Tiến độ</th>
+//                   <th>Trạng thái</th>
+//                   {/* <th>Hành động</th> */}
+//                 </tr>
+//               </thead>
+
+//               <tbody className="[&>tr:not(:last-child)]:border-b [&>tr]:border-slate-200">
+//                 {filteredStudents.map((hv) => {
+//                   const tk = hv.IDHocVien_detail?.TaiKhoan_detail;
+//                   const name = tk?.HoTen ?? hv.IDHocVien;
+//                   const email = tk?.Email ?? hv.IDHocVien;
+//                   const initials = getInitials(name);
+
+//                   return (
+//                     <tr
+//                       key={`${hv.LopHocID}-${hv.IDHocVien}`}
+//                       className="bg-white hover:bg-slate-50"
+//                     >
+//                       <td className="px-4 py-4">
+//                         <div className="flex items-center gap-3">
+//                           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black text-sm font-bold text-white">
+//                             {initials}
+//                           </div>
+//                           <div>
+//                             <div className="font-semibold text-slate-800">
+//                               {name}
+//                             </div>
+//                             <div className="text-[13px] text-slate-500">
+//                               {email}
+//                             </div>
+//                           </div>
+//                         </div>
+//                       </td>
+//                       <td className="px-4 py-4">-</td>
+//                       <td className="px-4 py-4">-</td>
+//                       <td className="px-4 py-4">-</td>
+//                       <td className="px-4 py-4">-</td>
+//                       <td className="px-4 py-4">-</td>
+//                       {/* <td className="px-4 py-4">
+//                         <button
+//                           type="button"
+//                           className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+//                         >
+//                           Xem
+//                         </button>
+//                       </td> */}
+//                     </tr>
+//                   );
+//                 })}
+
+//                 {filteredStudents.length === 0 && (
+//                   <tr>
+//                     <td
+//                       colSpan={7}
+//                       className="px-4 py-6 text-center text-slate-600"
+//                     >
+//                       Không có học viên trong lớp này (hoặc không khớp từ khóa).
+//                     </td>
+//                   </tr>
+//                 )}
+//               </tbody>
+//             </table>
+//           </div>
+//         </div>
+
+//         {/* =======================
+//          * Modal Add Class
+//          * ======================= */}
+//         <FormProvider {...addForms}>
+//           <Modal
+//             open={openAdd}
+//             onClose={() => {
+//               if (saving) return;
+//               setOpenAdd(false);
+//             }}
+//             title="Thêm lớp học"
+//             width={720}
+//             closeOnOverlayClick={!saving}
+//             closeOnEsc={!saving}
+//             footer={addFooter}
+//           >
+//             <div className="grid grid-cols-1 gap-4">
+//               <Input
+//                 name="IDLopHoc"
+//                 label="IDLopHoc"
+//                 placeholder="VD: LH00125"
+//                 inputClassName="focus:ring-4 focus:ring-violet-100"
+//               />
+//               <Input
+//                 name="TenLopHoc"
+//                 label="TenLopHoc"
+//                 placeholder="VD: TOEIC 0–450 Nền tảng"
+//                 inputClassName="focus:ring-4 focus:ring-violet-100"
+//               />
+//               <Input
+//                 name="MoTa"
+//                 label="Mô tả"
+//                 placeholder="Mô tả ngắn..."
+//                 inputClassName="focus:ring-4 focus:ring-violet-100"
+//               />
+//               <DropdownSelectPortal
+//                 name="IDGiaoVien"
+//                 label="Giáo viên"
+//                 placeholder={loading ? "Đang tải..." : "Chọn giáo viên"}
+//                 options={teacherOptions}
+//                 menuWidth={520}
+//                 placement="bottom"
+//                 disabled={loading || saving}
+//                 zIndex={12000}
+//               />
+//             </div>
+//           </Modal>
+//         </FormProvider>
+
+//         {/* =======================
+//          * Modal Edit Class (PATCH)
+//          * ======================= */}
+//         <FormProvider {...editForms}>
+//           <Modal
+//             open={openEdit}
+//             onClose={() => {
+//               if (savingEdit) return;
+//               setOpenEdit(false);
+//             }}
+//             title="Sửa lớp học"
+//             width={720}
+//             closeOnOverlayClick={!savingEdit}
+//             closeOnEsc={!savingEdit}
+//             footer={editFooter}
+//           >
+//             <div className="grid grid-cols-1 gap-4">
+//               <Input
+//                 name="IDLopHoc"
+//                 label="IDLopHoc"
+//                 placeholder="IDLopHoc"
+//                 inputClassName="focus:ring-4 focus:ring-violet-100"
+//               />
+
+//               <Input
+//                 name="TenLopHoc"
+//                 label="TenLopHoc"
+//                 placeholder="Tên lớp..."
+//                 inputClassName="focus:ring-4 focus:ring-violet-100"
+//               />
+
+//               <Input
+//                 name="MoTa"
+//                 label="Mô tả"
+//                 placeholder="Mô tả..."
+//                 inputClassName="focus:ring-4 focus:ring-violet-100"
+//               />
+
+//               <DropdownSelectPortal
+//                 name="IDGiaoVien"
+//                 label="Giáo viên"
+//                 placeholder={loading ? "Đang tải..." : "Chọn giáo viên"}
+//                 options={teacherOptions}
+//                 menuWidth={520}
+//                 placement="bottom"
+//                 disabled={loading || savingEdit}
+//                 zIndex={1200}
+//               />
+//             </div>
+//           </Modal>
+//         </FormProvider>
+
+//         {/* =======================
+//          * Modal Add Student to Class (PATCH)
+//          * - có search keyword
+//          * - ẩn học viên đã có trong lớp
+//          * ======================= */}
+//         <FormProvider {...addStudentForms}>
+//           <Modal
+//             open={openAddStudent}
+//             onClose={() => {
+//               if (addingStudent) return;
+//               setOpenAddStudent(false);
+//             }}
+//             title="Thêm học viên vào lớp"
+//             width={720}
+//             closeOnOverlayClick={!addingStudent}
+//             closeOnEsc={!addingStudent}
+//             footer={addStudentFooter}
+//           >
+//             <div className="grid grid-cols-1 gap-4">
+//               <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+//                 Lớp hiện tại:{" "}
+//                 <span className="font-semibold">
+//                   {selectedClassUI?.name ?? "-"} • {selectedId || "-"}
+//                 </span>
+//               </div>
+
+//               {/* Search keyword (lọc options dropdown) */}
+//               <Input
+//                 name="search_user"
+//                 type="search"
+//                 label="Tìm học viên"
+//                 placeholder="Nhập tên / email / ID tài khoản..."
+//                 inputClassName="focus:ring-4 focus:ring-violet-100"
+//               />
+
+//               <DropdownSelectPortal
+//                 name="IDHocVien"
+//                 label="Học viên"
+//                 placeholder={loadingUsers ? "Đang tải..." : "Chọn học viên"}
+//                 options={studentOptions}
+//                 menuWidth={560}
+//                 placement="bottom"
+//                 disabled={loadingUsers || addingStudent}
+//                 zIndex={12000}
+//               />
+
+//               <div className="flex flex-wrap items-center justify-between gap-2">
+//                 <div className="text-sm text-slate-600">
+//                   Đang hiển thị:{" "}
+//                   <span className="font-semibold">
+//                     {Math.max(0, studentOptions.length - 1)}
+//                   </span>{" "}
+//                   học viên (đã ẩn người đã có trong lớp)
+//                 </div>
+
+//                 <button
+//                   type="button"
+//                   onClick={fetchUsers}
+//                   className="h-10 w-fit rounded-xl border border-slate-200 bg-white px-4 font-semibold text-slate-700 hover:bg-slate-50"
+//                   disabled={loadingUsers || addingStudent}
+//                 >
+//                   {loadingUsers ? "Đang tải..." : "Reload danh sách học viên"}
+//                 </button>
+//               </div>
+
+//               {Math.max(0, studentOptions.length - 1) === 0 ? (
+//                 <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+//                   Không còn học viên nào để thêm (hoặc không khớp từ khoá).
+//                 </div>
+//               ) : null}
+//             </div>
+//           </Modal>
+//         </FormProvider>
+//       </ContentLayoutWrapper>
+//     </FormProvider>
+//   );
+// }
