@@ -610,7 +610,7 @@ export default function Dashboard() {
             "Nghe",
             "Đọc",
             "Sắp Xếp",
-            "Tổng số câu đúng (%)",
+            // "Tổng số câu đúng (%)",
             "Tổng điểm",
           ],
         ],
@@ -621,7 +621,7 @@ export default function Dashboard() {
           a.nghe,
           a.doc,
           a.sapXep,
-          `${a.dung}/${a.tongCau} (${a.percent}%)`,
+          // `${a.dung}/${a.tongCau} (${a.percent}%)`,
           a.tong,
         ]),
         styles: {
@@ -651,7 +651,7 @@ export default function Dashboard() {
           3: { cellWidth: 60, halign: "center" },
           4: { cellWidth: 60, halign: "center" },
           5: { cellWidth: 90, halign: "center" },
-          6: { cellWidth: 150, halign: "center" },
+          // 6: { cellWidth: 150, halign: "center" },
           7: { cellWidth: 90, halign: "center" },
         },
       });
